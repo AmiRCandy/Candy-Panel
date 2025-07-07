@@ -1,22 +1,18 @@
 #!/bin/bash
 
-
 # --- Configuration Variables ---
 PROJECT_NAME="CandyPanel"
 REPO_URL="https://github.com/AmiRCandy/Candy-Panel.git"
 PROJECT_ROOT="/var/www/$PROJECT_NAME"
 BACKEND_DIR="$PROJECT_ROOT/Backend"
 FRONTEND_DIR="$PROJECT_ROOT/Frontend"
-FASTAPI_APP_ENTRY="main:app"
+FLASK_APP_ENTRY="main.py" # Ensure this is the file where your Flask app is defined and serves static files
 LINUX_USER=$(whoami)
-# --- Backend specific configuration (changed from Gunicorn Socket to Uvicorn TCP) ---
+# --- Backend specific configuration ---
+# Flask will now serve both frontend and backend on this port
 BACKEND_HOST="0.0.0.0"
-BACKEND_PORT="3446" # Using 8000 for backend to avoid conflict with Nginx on 3445
-# --- Nginx Configuration ---
-NGINX_CONF_PATH="/etc/nginx/sites-available/$PROJECT_NAME"
-NGINX_SYMLINK_PATH="/etc/nginx/sites-enabled/$PROJECT_NAME"
-# --- No separate Gunicorn log directory needed for direct Uvicorn run ---
-# GUNICORN_LOG_DIR="/var/log/gunicorn" # No longer needed, Uvicorn logs to stdout/stderr (journalctl)
+BACKEND_PORT="3446" # This will be the publicly accessible port for everything
+
 # NVM specific
 NVM_VERSION="v0.40.3" # Always check https://github.com/nvm-sh/nvm for the latest version
 NODE_VERSION="22" # Install Node.js v22.x.x
@@ -71,9 +67,8 @@ confirm_action() {
 check_prerequisites() {
     print_info "Checking for required system packages..."
     local missing_packages=()
-    # Removed 'npm' from this list as it will be installed via NVM
-    # Removed 'gunicorn' from this list as we're using uvicorn directly
-    for cmd in git python3 nginx ufw certbot python3.10-venv curl; do
+    # Removed nginx and certbot
+    for cmd in git python3 ufw python3.10-venv curl; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_packages+=("$cmd")
         fi
@@ -116,21 +111,17 @@ install_nodejs_with_nvm() {
     print_info "--- Installing Node.js and npm using NVM ---"
     sleep 1
 
-    # Check if NVM is already installed
     if [ -s "$HOME/.nvm/nvm.sh" ]; then
         print_warning "NVM appears to be already installed. Sourcing it..."
         . "$HOME/.nvm/nvm.sh" # Source NVM
     else
         print_info "Installing NVM (Node Version Manager)..."
-        # Download and run the NVM installation script
         curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_VERSION/install.sh" | bash || { print_error "Failed to download and install NVM."; exit 1; }
         
-        # Source NVM script to make 'nvm' command available in the current session
         export NVM_DIR="$HOME/.nvm"
-        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
         
-        # Verify NVM is sourced
         if ! command -v nvm &> /dev/null; then
             print_error "NVM command not found after installation and sourcing. Please check NVM installation manually."
             exit 1
@@ -155,7 +146,6 @@ install_nodejs_with_nvm() {
     sleep 1
 }
 
-
 clone_or_update_repo() {
     print_header
     print_info "Starting deployment process for $PROJECT_NAME..."
@@ -165,7 +155,7 @@ clone_or_update_repo() {
         print_warning "Project directory '$PROJECT_ROOT' already exists."
         confirm_action "Do you want to pull the latest changes from the repository?"
         print_info "Navigating to $PROJECT_ROOT and pulling latest changes..."
-        sudo git -C "$PROJECT_ROOT" pull origin main || sudo git -C "$PROJECT_ROOT" pull origin master # Adjust branch if needed
+        sudo git -C "$PROJECT_ROOT" pull origin main || sudo git -C "$PROJECT_ROOT" pull origin master
         if [ $? -ne 0 ]; then
             print_error "Failed to pull latest changes from repository. Check permissions or network."
             exit 1
@@ -173,7 +163,9 @@ clone_or_update_repo() {
         print_success "Repository updated."
     else
         print_info "Cloning repository '$REPO_URL' into '$PROJECT_ROOT'..."
-        sudo mkdir -p "$(dirname "$PROJECT_ROOT")" || { print_error "Failed to create parent directory for $PROJECT_ROOT"; exit 1; }
+        # Corrected: Create parent directory correctly if it doesn't exist
+        sudo mkdir -p "$(dirname "$PROJECT_ROOT")"
+
         sudo git clone "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
         sudo chown -R "$LINUX_USER:$LINUX_USER" "$PROJECT_ROOT" || { print_warning "Could not change ownership of $PROJECT_ROOT to $LINUX_USER. Manual intervention might be needed for permissions."; }
         print_success "Repository cloned successfully."
@@ -181,9 +173,9 @@ clone_or_update_repo() {
     sleep 1
 }
 
-# --- Backend Deployment (Updated for Uvicorn direct run) ---
+# --- Backend Deployment ---
 deploy_backend() {
-    print_info "--- Deploying FastAPI Backend with Uvicorn ---"
+    print_info "--- Deploying Flask Backend ---"
     sleep 1
 
     print_info "Navigating to backend directory: $BACKEND_DIR"
@@ -195,26 +187,27 @@ deploy_backend() {
     print_success "Virtual environment activated."
     sleep 1
 
-    # Only install uvicorn[standard], no need for gunicorn
-    print_info "Installing Python dependencies: fastapi, psutil, requests, pyrogram, uvicorn[standard]..."
-    pip install fastapi psutil requests pyrogram "uvicorn[standard]" || { print_error "Failed to install Python dependencies."; exit 1; }
+    print_info "Installing Python dependencies (Flask etc.)..."
+    # Assuming requirements.txt exists and contains all necessary packages
+    pip install -r requirements.txt || { print_error "Failed to install Python dependencies from requirements.txt."; exit 1; }
     print_success "Python dependencies installed."
     sleep 1
 
-    # No Gunicorn configuration file needed for direct Uvicorn run
-    # Removing the Gunicorn_LOG_DIR creation and gunicorn_config.py tee block
-
-    print_info "Creating Systemd service file for FastAPI (Uvicorn)..."
-    sudo tee "/etc/systemd/system/${PROJECT_NAME}_fastapi.service" > /dev/null <<EOF
+    print_info "Creating Systemd service file for Flask..."
+    sudo tee "/etc/systemd/system/${PROJECT_NAME}_flask.service" > /dev/null <<EOF
 [Unit]
-Description=Uvicorn instance for ${PROJECT_NAME} FastAPI
+Description=Flask instance for ${PROJECT_NAME}
 After=network.target
 
 [Service]
 User=$LINUX_USER
 Group=$LINUX_USER
 WorkingDirectory=$BACKEND_DIR
-ExecStart=$BACKEND_DIR/venv/bin/uvicorn $FASTAPI_APP_ENTRY --host $BACKEND_HOST --port $BACKEND_PORT --log-level info
+Environment="FLASK_APP=$FLASK_APP_ENTRY"
+# Explicitly tell Flask to run on the configured host and port
+Environment="FLASK_RUN_HOST=$BACKEND_HOST"
+Environment="FLASK_RUN_PORT=$BACKEND_PORT"
+ExecStart=$BACKEND_DIR/venv/bin/python3 $FLASK_APP_ENTRY
 Restart=always
 RestartSec=5s
 
@@ -224,13 +217,13 @@ EOF
     print_success "Systemd service file created."
     sleep 1
 
-    print_info "Reloading Systemd daemon, enabling and starting FastAPI service..."
+    print_info "Reloading Systemd daemon, enabling and starting Flask service..."
     sudo systemctl daemon-reload || { print_error "Failed to reload Systemd daemon."; exit 1; }
-    sudo systemctl enable "${PROJECT_NAME}_fastapi.service" || { print_error "Failed to enable FastAPI service."; exit 1; }
-    sudo systemctl start "${PROJECT_NAME}_fastapi.service" || { print_error "Failed to start FastAPI service."; exit 1; }
-    print_success "FastAPI service started and enabled to run on boot."
-    print_info "You can check its status with: sudo systemctl status ${PROJECT_NAME}_fastapi.service"
-    print_info "View logs with: journalctl -u ${PROJECT_NAME}_fastapi.service --since '1 hour ago'"
+    sudo systemctl enable "${PROJECT_NAME}_flask.service" || { print_error "Failed to enable Flask service."; exit 1; }
+    sudo systemctl start "${PROJECT_NAME}_flask.service" || { print_error "Failed to start Flask service."; exit 1; }
+    print_success "Flask service started and enabled to run on boot."
+    print_info "You can check its status with: sudo systemctl status ${PROJECT_NAME}_flask.service"
+    print_info "View logs with: journalctl -u ${PROJECT_NAME}_flask.service --since '1 hour ago'"
     sleep 2
 }
 
@@ -242,12 +235,12 @@ deploy_frontend() {
     print_info "Navigating to frontend directory: $FRONTEND_DIR"
     cd "$FRONTEND_DIR" || { print_error "Frontend directory not found: $FRONTEND_DIR"; exit 1; }
 
-    # Ensure NVM is sourced again for this subshell if not already
+    # Ensure NVM is sourced again for this subshell
     if [ -s "$HOME/.nvm/nvm.sh" ]; then
-        . "$HOME/.nvm/nvm.sh" # Source NVM
+        . "$HOME/.nvm/nvm.sh"
         nvm use "$NODE_VERSION" || print_warning "Could not activate Node.js v${NODE_VERSION} with nvm in this subshell. Continuing anyway."
     else
-        print_error "NVM not found or not sourced. Node.js/npm commands might fail. Did install_nodejs_with_nvm run successfully?"
+        print_error "NVM not found or not sourced. Node.js/npm commands might fail."
         exit 1
     fi
 
@@ -262,71 +255,37 @@ deploy_frontend() {
     sleep 2
 }
 
-# --- Nginx Configuration (Updated for Uvicorn TCP backend) ---
-configure_nginx() {
-    print_info "--- Configuring Nginx ---"
+# --- Configure Frontend API URL in .env.production and Rebuild ---
+configure_frontend_api_url() {
+    print_info "--- Configuring Frontend API URL ---"
     sleep 1
 
-    local domain_name
-    read -p "$(echo -e "${YELLOW}INPUT:${RESET} Enter your domain name (e.g., example.com or your server IP): ")" domain_name
-    if [ -z "$domain_name" ]; then
-        print_error "Domain name cannot be empty. Exiting."
+    local server_ip
+    read -p "$(echo -e "${YELLOW}INPUT:${RESET} Enter your server's public IP address (e.g., 192.168.1.100) or domain name if using one: ")" server_ip
+    if [ -z "$server_ip" ]; then
+        print_error "Server IP/Domain cannot be empty. Exiting."
         exit 1
     fi
 
-    print_info "Creating Nginx configuration file for $domain_name..."
-    sudo tee "$NGINX_CONF_PATH" > /dev/null <<EOF
-server {
-    listen 3445 ; # Nginx listens for public traffic on 3445
-    server_name $domain_name www.$domain_name; # Add www. if applicable
+    # API URL now points directly to Flask's address
+    local frontend_api_url="http://$server_ip:$BACKEND_PORT"
 
-    # Serve React Vite frontend static files
-    location / {
-        root $FRONTEND_DIR/dist;
-        try_files \$uri \$uri/ /index.html;
-    }
-
-    # Proxy API requests to FastAPI backend (listening on localhost:8000)
-    location /api/ {
-        proxy_pass http://127.0.0.1:$BACKEND_PORT; # Proxy to Uvicorn's TCP port
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_redirect off;
-    }
-
-    error_log /var/log/nginx/${PROJECT_NAME}_error.log warn;
-    access_log /var/log/nginx/${PROJECT_NAME}_access.log combined;
-}
-EOF
-    print_success "Nginx configuration created at $NGINX_CONF_PATH."
+    print_info "Writing frontend environment variable VITE_APP_API_URL to .env.production..."
+    echo "export VITE_APP_API_URL=$frontend_api_url" | sudo tee "$FRONTEND_DIR/.env.production" > /dev/null || { print_error "Failed to write .env.production file. Check permissions."; exit 1; }
+    print_success ".env.production created/updated with VITE_APP_API_URL=$frontend_api_url"
+    sudo chown "$LINUX_USER:$LINUX_USER" "$FRONTEND_DIR/.env.production" || { print_warning "Could not change ownership of .env.production. Manual intervention might be needed for permissions."; }
     sleep 1
 
-    print_info "Creating symlink to enable Nginx site..."
-    if [ -L "$NGINX_SYMLINK_PATH" ]; then
-        print_warning "Nginx symlink already exists. Removing old one."
-        sudo rm "$NGINX_SYMLINK_PATH"
-    fi
-    sudo ln -s "$NGINX_CONF_PATH" "$NGINX_SYMLINK_PATH" || { print_error "Failed to create Nginx symlink."; exit 1; }
-    print_success "Nginx site enabled."
+    # Rebuild frontend to apply the new .env.production
+    print_info "Rebuilding frontend to apply new API URL..."
+    cd "$FRONTEND_DIR" || { print_error "Frontend directory not found: $FRONTEND_DIR"; exit 1; }
+    npm run build || { print_error "Failed to rebuild React Vite frontend after updating API URL."; exit 1; }
+    print_success "Frontend rebuilt successfully with updated API URL."
     sleep 1
-
-    print_info "Testing Nginx configuration..."
-    sudo nginx -t || { print_error "Nginx configuration test failed. Please check the config file: $NGINX_CONF_PATH"; exit 1; }
-    print_success "Nginx configuration test successful."
-    sleep 1
-
-    print_info "Restarting Nginx service..."
-    sudo systemctl restart nginx || { print_error "Failed to restart Nginx service."; exit 1; }
-    print_success "Nginx service restarted."
-    sleep 2
-
-    # Store domain name for Certbot
-    echo "$domain_name" > /tmp/${PROJECT_NAME}_domain.txt
 }
 
-# --- Firewall Configuration (Updated for backend port) ---
+
+# --- Firewall Configuration ---
 configure_firewall() {
     print_info "--- Configuring Firewall (UFW) ---"
     sleep 1
@@ -336,77 +295,39 @@ configure_firewall() {
     print_success "UFW is active."
     sleep 1
 
-    print_info "Allowing Nginx Full (HTTP and HTTPS) through firewall..."
-    sudo ufw allow 'Nginx Full' || { print_error "Failed to allow Nginx Full through UFW."; exit 1; }
-    print_success "Nginx Full profile allowed (ports 80, 443)."
-
-    print_info "Allowing port 3445 for Nginx frontend access..."
-    sudo ufw allow 3445/tcp || { print_error "Failed to allow port 3445 through UFW."; exit 1; }
-    print_success "Port 3445 allowed."
-
-    # Explicitly allow localhost connections to backend port (8000) for Nginx to connect
-    # This is typically not strictly necessary for UFW defaults, but ensures it.
-    # We do NOT open port 8000 to the public internet, as Nginx is the proxy.
-    print_info "Allowing internal localhost access to backend port $BACKEND_PORT for Nginx..."
-    sudo ufw allow from 127.0.0.1 to any port "$BACKEND_PORT" proto tcp || { print_error "Failed to allow localhost access to backend port $BACKEND_PORT."; exit 1; }
-    print_success "Internal access to backend port $BACKEND_PORT allowed."
+    # Only allow the backend port, as Flask serves everything directly
+    print_info "Allowing external access to port $BACKEND_PORT for Flask application..."
+    sudo ufw allow $BACKEND_PORT/tcp || { print_error "Failed to allow port $BACKEND_PORT through UFW."; exit 1; }
+    print_success "Port $BACKEND_PORT allowed for external access."
 
     print_info "You can check UFW status with: sudo ufw status"
-    sleep 2
-}
-
-# --- SSL with Certbot ---
-setup_ssl() {
-    print_info "--- Setting up SSL with Let's Encrypt (Certbot) ---"
-    sleep 1
-
-    local domain_name=$(cat /tmp/${PROJECT_NAME}_domain.txt 2>/dev/null)
-    if [ -z "$domain_name" ] || [[ "$domain_name" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        print_warning "Skipping SSL setup: No valid domain name found or it's an IP address."
-        print_warning "You can manually run 'sudo certbot --nginx -d your_domain.com' later if you set up a domain."
-        return
-    fi
-
-    confirm_action "Do you want to set up HTTPS with Let's Encrypt for $domain_name?"
-    print_info "Running Certbot to obtain and install SSL certificate..."
-    # Certbot needs to verify domain ownership via standard HTTP/HTTPS ports (80/443).
-    # Nginx Full profile should ensure these are open.
-    sudo certbot --nginx -d "$domain_name" -d "www.$domain_name" || { print_error "Certbot failed. Check DNS records and Nginx configuration."; return; }
-    print_success "SSL certificate obtained and installed successfully!"
-    print_info "Your site should now be accessible via HTTPS."
     sleep 2
 }
 
 # --- Main Execution Flow ---
 main() {
     print_header
-    confirm_action "This script will deploy your Candy panel. Ensure you have updated the REPO_URL variable in the script."
+    confirm_action "This script will deploy your Candy panel with Flask serving both frontend and backend. Ensure you have updated the REPO_URL variable in the script."
 
     check_prerequisites
     install_nodejs_with_nvm
     clone_or_update_repo
-    deploy_backend # Now uses Uvicorn directly
+    deploy_backend
     deploy_frontend
-    configure_nginx # Updated for Uvicorn TCP backend
-    configure_firewall # Updated for Uvicorn TCP backend port
-    setup_ssl
+    configure_frontend_api_url # New step to configure frontend URL
+    configure_firewall
+    # Removed setup_ssl as Nginx and Certbot are not used
 
     echo -e "\n${BOLD}${GREEN}====================================================${RESET}"
-    echo -e "${BOLD}${GREEN}  Deployment Complete!                                ${RESET}"
+    echo -e "${BOLD}${GREEN}  Deployment Complete!                              ${RESET}"
     echo -e "${BOLD}${GREEN}====================================================${RESET}"
-    local final_domain=$(cat /tmp/${PROJECT_NAME}_domain.txt 2>/dev/null)
-    if [ -n "$final_domain" ] && ! [[ "$final_domain" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        echo -e "${BOLD}${GREEN}  Your Candy Panel should now be accessible at:${RESET}"
-        echo -e "${BOLD}${GREEN}  https://$final_domain${RESET}"
-    else
-        echo -e "${BOLD}${GREEN}  Your Candy Panel should now be accessible at:${RESET}"
-        echo -e "${BOLD}${GREEN}  http://YOUR_SERVER_IP:3445${RESET}" # Adjusted to reflect Nginx listening on 3445
-        print_warning "Remember to replace YOUR_SERVER_IP with your actual server's public IP address."
-        print_warning "Note: If using an IP, SSL will not be configured."
-    fi
+    echo -e "${BOLD}${GREEN}  Your Candy Panel should now be accessible at:${RESET}"
+    echo -e "${BOLD}${GREEN}  http://YOUR_SERVER_IP:$BACKEND_PORT${RESET}"
+    print_warning "Remember to replace YOUR_SERVER_IP with your actual server's public IP address."
+    print_warning "Note: SSL is NOT configured with this setup. For HTTPS, you will need to add a reverse proxy like Nginx or Caddy."
     echo -e "${BOLD}${GREEN}====================================================${RESET}\n"
     print_info "Ensure the Linux user '$LINUX_USER' has appropriate permissions for WireGuard operations."
-    rm -f /tmp/${PROJECT_NAME}_domain.txt # Clean up temp file
+    print_info "Flask application is running on port $BACKEND_PORT and serving all content."
 }
 
 main "$@"
