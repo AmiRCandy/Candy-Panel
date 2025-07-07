@@ -8,7 +8,7 @@ export const API_CONFIG = {
     // System check and authentication
     CHECK_INSTALLATION: '/check',
     AUTH: '/api/auth',
-    
+    LOGIN_AUTH:'/api/auth',
     // Unified data endpoint
     GET_ALL_DATA: '/api/data',
     
