@@ -3,6 +3,7 @@ import { apiService } from '@/services/api';
 import { API_CONFIG } from '@/config/api';
 
 export interface LoginCredentials {
+  action:string,
   username: string;
   password: string;
 }
