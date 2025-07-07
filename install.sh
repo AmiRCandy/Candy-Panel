@@ -248,11 +248,6 @@ deploy_frontend() {
     npm install || { print_error "Failed to install Node.js dependencies. Check npm logs and internet connection."; exit 1; }
     print_success "Node.js dependencies installed."
     sleep 1
-
-    print_info "Building React Vite frontend for production..."
-    npm run build || { print_error "Failed to build React Vite frontend. Check your package.json 'build' script and Node.js environment."; exit 1; }
-    print_success "Frontend built successfully. Static files are in '$FRONTEND_DIR/dist'."
-    sleep 2
 }
 
 # --- Configure Frontend API URL in .env.production and Rebuild ---
@@ -268,7 +263,7 @@ configure_frontend_api_url() {
     fi
 
     # API URL now points directly to Flask's address
-    local frontend_api_url="http://$server_ip:$BACKEND_PORT/api"
+    local frontend_api_url="http://$server_ip:$BACKEND_PORT"
 
     print_info "Writing frontend environment variable VITE_APP_API_URL to .env.production..."
     echo "export VITE_APP_API_URL=$frontend_api_url" | sudo tee "$FRONTEND_DIR/.env.production" > /dev/null || { print_error "Failed to write .env.production file. Check permissions."; exit 1; }
