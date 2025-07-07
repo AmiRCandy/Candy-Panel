@@ -17,7 +17,7 @@ export const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      const success = await login(username, password);
+      const success = await login(username, password,'login');
       if (!success) {
         setError('Invalid credentials');
       }
