@@ -1,5 +1,5 @@
 // Frontend/src/pages/Dashboard.tsx
-import React, { useEffect } from 'react'; // Import useEffect
+import React, { useEffect, useCallback } from 'react'; // Import useCallback
 import { motion } from 'framer-motion';
 import { Users, Server, Activity, Download, Globe, Loader } from 'lucide-react';
 import { StatsCard } from '@/components/Dashboard/StatsCard';
@@ -8,9 +8,15 @@ import { serverService } from '@/services/serverService';
 import { useApi } from '@/hooks/useApi';
 
 export const Dashboard: React.FC = () => {
-  // Fetch server stats using the useApi hook
-  const { data: stats, loading: statsLoading, error, refetch } = useApi(
+  // Memoize the API call function using useCallback
+  const getDashboardStatsCallback = useCallback(
     () => serverService.getDashboardStats(),
+    [] // Empty dependency array means this function is created once
+  );
+
+  // Fetch server stats using the useApi hook with the memoized callback
+  const { data: stats, loading: statsLoading, error, refetch } = useApi(
+    getDashboardStatsCallback, // Use the memoized callback here
     {
       onSuccess: (data) => console.log('✅ Dashboard stats loaded:', data),
       onError: (err) => console.error('❌ Failed to load dashboard stats:', err),
