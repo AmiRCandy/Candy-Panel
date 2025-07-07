@@ -70,12 +70,12 @@ pip install fastapi uvicorn sqlite3 subprocess psutil
 
 3. **Start the backend server**
 ```bash
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn main:app --host 0.0.0.0 --port 3445 --reload
 ```
 
 4. **Access the application**
-   - Frontend: `http://localhost:5173`
-   - Backend API: `http://localhost:8000`
+   - Frontend: `http://localhost:3445`
+   - Backend API: `http://localhost:3445`
 
 ## 🏗️ Architecture
 

@@ -9,10 +9,14 @@ BACKEND_DIR="$PROJECT_ROOT/Backend"
 FRONTEND_DIR="$PROJECT_ROOT/Frontend"
 FASTAPI_APP_ENTRY="main:app"
 LINUX_USER=$(whoami)
-GUNICORN_SOCK="/tmp/${PROJECT_NAME}_fastapi.sock"
+# --- Backend specific configuration (changed from Gunicorn Socket to Uvicorn TCP) ---
+BACKEND_HOST="0.0.0.0"
+BACKEND_PORT="3446" # Using 8000 for backend to avoid conflict with Nginx on 3445
+# --- Nginx Configuration ---
 NGINX_CONF_PATH="/etc/nginx/sites-available/$PROJECT_NAME"
 NGINX_SYMLINK_PATH="/etc/nginx/sites-enabled/$PROJECT_NAME"
-GUNICORN_LOG_DIR="/var/log/gunicorn"
+# --- No separate Gunicorn log directory needed for direct Uvicorn run ---
+# GUNICORN_LOG_DIR="/var/log/gunicorn" # No longer needed, Uvicorn logs to stdout/stderr (journalctl)
 # NVM specific
 NVM_VERSION="v0.40.3" # Always check https://github.com/nvm-sh/nvm for the latest version
 NODE_VERSION="22" # Install Node.js v22.x.x
@@ -68,6 +72,7 @@ check_prerequisites() {
     print_info "Checking for required system packages..."
     local missing_packages=()
     # Removed 'npm' from this list as it will be installed via NVM
+    # Removed 'gunicorn' from this list as we're using uvicorn directly
     for cmd in git python3 nginx ufw certbot python3.10-venv curl; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_packages+=("$cmd")
@@ -160,9 +165,6 @@ clone_or_update_repo() {
         print_warning "Project directory '$PROJECT_ROOT' already exists."
         confirm_action "Do you want to pull the latest changes from the repository?"
         print_info "Navigating to $PROJECT_ROOT and pulling latest changes..."
-        # Use sudo for git operations in /var/www if the script is run by a non-root user
-        # that doesn't own /var/www/$PROJECT_NAME. It's generally better to set correct permissions
-        # so the LINUX_USER owns the project directory.
         sudo git -C "$PROJECT_ROOT" pull origin main || sudo git -C "$PROJECT_ROOT" pull origin master # Adjust branch if needed
         if [ $? -ne 0 ]; then
             print_error "Failed to pull latest changes from repository. Check permissions or network."
@@ -173,16 +175,15 @@ clone_or_update_repo() {
         print_info "Cloning repository '$REPO_URL' into '$PROJECT_ROOT'..."
         sudo mkdir -p "$(dirname "$PROJECT_ROOT")" || { print_error "Failed to create parent directory for $PROJECT_ROOT"; exit 1; }
         sudo git clone "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
-        # Ensure the current user (or the user specified by LINUX_USER) owns the cloned directory
         sudo chown -R "$LINUX_USER:$LINUX_USER" "$PROJECT_ROOT" || { print_warning "Could not change ownership of $PROJECT_ROOT to $LINUX_USER. Manual intervention might be needed for permissions."; }
         print_success "Repository cloned successfully."
     fi
     sleep 1
 }
 
-# --- Backend Deployment ---
+# --- Backend Deployment (Updated for Uvicorn direct run) ---
 deploy_backend() {
-    print_info "--- Deploying FastAPI Backend ---"
+    print_info "--- Deploying FastAPI Backend with Uvicorn ---"
     sleep 1
 
     print_info "Navigating to backend directory: $BACKEND_DIR"
@@ -194,43 +195,26 @@ deploy_backend() {
     print_success "Virtual environment activated."
     sleep 1
 
-    print_info "Installing Python dependencies: fastapi, psutil, requests, pyrogram, uvicorn[standard], gunicorn..."
-    pip install fastapi psutil requests pyrogram "uvicorn[standard]" gunicorn || { print_error "Failed to install Python dependencies."; exit 1; }
+    # Only install uvicorn[standard], no need for gunicorn
+    print_info "Installing Python dependencies: fastapi, psutil, requests, pyrogram, uvicorn[standard]..."
+    pip install fastapi psutil requests pyrogram "uvicorn[standard]" || { print_error "Failed to install Python dependencies."; exit 1; }
     print_success "Python dependencies installed."
     sleep 1
 
-    print_info "Creating Gunicorn configuration file..."
-    sudo mkdir -p "$GUNICORN_LOG_DIR" || { print_error "Failed to create Gunicorn log directory."; exit 1; }
-    # Ensure gunicorn_config.py is owned by the user running the script if it needs to be modified by them
-    sudo tee gunicorn_config.py > /dev/null <<EOF
-# gunicorn_config.py
-import multiprocessing
+    # No Gunicorn configuration file needed for direct Uvicorn run
+    # Removing the Gunicorn_LOG_DIR creation and gunicorn_config.py tee block
 
-bind = "$GUNICORN_SOCK"
-workers = multiprocessing.cpu_count() * 2 + 1
-worker_class = "uvicorn.workers.UvicornWorker"
-loglevel = "info"
-accesslog = "${GUNICORN_LOG_DIR}/access.log"
-errorlog = "${GUNICORN_LOG_DIR}/error.log"
-timeout = 120
-keepalive = 5
-EOF
-    print_success "Gunicorn configuration created."
-    # Fix permissions for the config file if tee created it as root
-    sudo chown "$LINUX_USER:$LINUX_USER" gunicorn_config.py
-    sleep 1
-
-    print_info "Creating Systemd service file for FastAPI..."
+    print_info "Creating Systemd service file for FastAPI (Uvicorn)..."
     sudo tee "/etc/systemd/system/${PROJECT_NAME}_fastapi.service" > /dev/null <<EOF
 [Unit]
-Description=Gunicorn instance for ${PROJECT_NAME} FastAPI
+Description=Uvicorn instance for ${PROJECT_NAME} FastAPI
 After=network.target
 
 [Service]
 User=$LINUX_USER
 Group=$LINUX_USER
 WorkingDirectory=$BACKEND_DIR
-ExecStart=$BACKEND_DIR/venv/bin/gunicorn -c $BACKEND_DIR/gunicorn_config.py $FASTAPI_APP_ENTRY
+ExecStart=$BACKEND_DIR/venv/bin/uvicorn $FASTAPI_APP_ENTRY --host $BACKEND_HOST --port $BACKEND_PORT --log-level info
 Restart=always
 RestartSec=5s
 
@@ -267,7 +251,6 @@ deploy_frontend() {
         exit 1
     fi
 
-
     print_info "Installing Node.js dependencies..."
     npm install || { print_error "Failed to install Node.js dependencies. Check npm logs and internet connection."; exit 1; }
     print_success "Node.js dependencies installed."
@@ -279,7 +262,7 @@ deploy_frontend() {
     sleep 2
 }
 
-# --- Nginx Configuration ---
+# --- Nginx Configuration (Updated for Uvicorn TCP backend) ---
 configure_nginx() {
     print_info "--- Configuring Nginx ---"
     sleep 1
@@ -294,7 +277,7 @@ configure_nginx() {
     print_info "Creating Nginx configuration file for $domain_name..."
     sudo tee "$NGINX_CONF_PATH" > /dev/null <<EOF
 server {
-    listen 3445 ;
+    listen 3445 ; # Nginx listens for public traffic on 3445
     server_name $domain_name www.$domain_name; # Add www. if applicable
 
     # Serve React Vite frontend static files
@@ -303,9 +286,9 @@ server {
         try_files \$uri \$uri/ /index.html;
     }
 
-    # Proxy API requests to FastAPI backend
+    # Proxy API requests to FastAPI backend (listening on localhost:8000)
     location /api/ {
-        proxy_pass http://unix:$GUNICORN_SOCK;
+        proxy_pass http://127.0.0.1:$BACKEND_PORT; # Proxy to Uvicorn's TCP port
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -343,7 +326,7 @@ EOF
     echo "$domain_name" > /tmp/${PROJECT_NAME}_domain.txt
 }
 
-# --- Firewall Configuration ---
+# --- Firewall Configuration (Updated for backend port) ---
 configure_firewall() {
     print_info "--- Configuring Firewall (UFW) ---"
     sleep 1
@@ -355,7 +338,19 @@ configure_firewall() {
 
     print_info "Allowing Nginx Full (HTTP and HTTPS) through firewall..."
     sudo ufw allow 'Nginx Full' || { print_error "Failed to allow Nginx Full through UFW."; exit 1; }
-    print_success "Nginx Full profile allowed."
+    print_success "Nginx Full profile allowed (ports 80, 443)."
+
+    print_info "Allowing port 3445 for Nginx frontend access..."
+    sudo ufw allow 3445/tcp || { print_error "Failed to allow port 3445 through UFW."; exit 1; }
+    print_success "Port 3445 allowed."
+
+    # Explicitly allow localhost connections to backend port (8000) for Nginx to connect
+    # This is typically not strictly necessary for UFW defaults, but ensures it.
+    # We do NOT open port 8000 to the public internet, as Nginx is the proxy.
+    print_info "Allowing internal localhost access to backend port $BACKEND_PORT for Nginx..."
+    sudo ufw allow from 127.0.0.1 to any port "$BACKEND_PORT" proto tcp || { print_error "Failed to allow localhost access to backend port $BACKEND_PORT."; exit 1; }
+    print_success "Internal access to backend port $BACKEND_PORT allowed."
+
     print_info "You can check UFW status with: sudo ufw status"
     sleep 2
 }
@@ -374,8 +369,8 @@ setup_ssl() {
 
     confirm_action "Do you want to set up HTTPS with Let's Encrypt for $domain_name?"
     print_info "Running Certbot to obtain and install SSL certificate..."
-    # Ensure Nginx is allowing traffic on ports 80/443 for Certbot to work, even if your app uses 3445
-    # Certbot needs to verify domain ownership via standard HTTP/HTTPS ports.
+    # Certbot needs to verify domain ownership via standard HTTP/HTTPS ports (80/443).
+    # Nginx Full profile should ensure these are open.
     sudo certbot --nginx -d "$domain_name" -d "www.$domain_name" || { print_error "Certbot failed. Check DNS records and Nginx configuration."; return; }
     print_success "SSL certificate obtained and installed successfully!"
     print_info "Your site should now be accessible via HTTPS."
@@ -388,12 +383,12 @@ main() {
     confirm_action "This script will deploy your Candy panel. Ensure you have updated the REPO_URL variable in the script."
 
     check_prerequisites
-    install_nodejs_with_nvm # NEW STEP: Install Node.js/npm with NVM
+    install_nodejs_with_nvm
     clone_or_update_repo
-    deploy_backend
+    deploy_backend # Now uses Uvicorn directly
     deploy_frontend
-    configure_nginx
-    configure_firewall
+    configure_nginx # Updated for Uvicorn TCP backend
+    configure_firewall # Updated for Uvicorn TCP backend port
     setup_ssl
 
     echo -e "\n${BOLD}${GREEN}====================================================${RESET}"
