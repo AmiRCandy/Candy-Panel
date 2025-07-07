@@ -35,7 +35,7 @@ def authenticate_admin(f):
             abort(401, description="Unsupported authorization type")
 
         # Run synchronous DB operation in a thread pool
-        settings = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'session_token'})
+        settings = await asyncio.to_thread(candy_panel.db.get, 'settings','*' ,{'key': 'session_token'})
         if not settings or settings['value'] != token:
             abort(401, description="Invalid authentication credentials")
 
@@ -57,7 +57,7 @@ async def check_installation():
     """
     Checks if the CandyPanel is installed.
     """
-    install_status = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'install'})
+    install_status = await asyncio.to_thread(candy_panel.db.get, 'settings', '*',{'key': 'install'})
     is_installed = bool(install_status and install_status['value'] == '1')
     return jsonify({"installed": is_installed})
 
@@ -71,8 +71,8 @@ async def handle_auth():
         return error_response("Missing 'action' in request body", 400)
 
     action = data['action']
-    install_status = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'install'})
-    is_installed = bool(install_status['value'])
+    install_status = await asyncio.to_thread(candy_panel.db.get, 'settings', '*',{'key': 'install'})
+    is_installed = bool(install_status and install_status['value'] == '1')
 
     if action == 'login':
         if not is_installed:
