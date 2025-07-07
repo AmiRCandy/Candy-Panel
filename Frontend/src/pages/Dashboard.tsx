@@ -1,30 +1,19 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import { Users, Server, Activity, Download, Globe } from 'lucide-react';
 import { StatsCard } from '@/components/Dashboard/StatsCard';
 import { BandwidthChart } from '@/components/Dashboard/BandwidthChart';
-import { useApi } from '@/hooks/useApi';
-import { clientService } from '@/services/clientService';
 import { serverService } from '@/services/serverService';
 
 export const Dashboard: React.FC = () => {
-  // Memoize the API call to avoid re-creating it on each render
-  const fetchServerStats = useCallback(() => serverService.getDashboardStats(), []);
-
-  // Fetch server stats
-  const { data: serverStats, loading: statsLoading } = useApi(fetchServerStats, {
-    onSuccess: (data) => console.log('✅ Server stats loaded:', data),
-    onError: (error) => console.error('❌ Failed to load server stats:', error)
-  });
-
-  const stats = serverStats || {
+  // Fetch server stat
+  const stats = serverService.getDashboardStats() || {
     cpu: '0%',
     mem: { usage: '0%' },
     clients_count: 0,
     bandwidth: '0',
     uptime: '0',
-    net: { download: '0 KB/s', upload: '0 KB/s' },
-    status: '0'
+    net: { download: '0 KB/s', upload: '0 KB/s' }
   };
 
   const formatUptime = (seconds: string) => {
@@ -32,7 +21,7 @@ export const Dashboard: React.FC = () => {
     const days = Math.floor(sec / 86400);
     const hours = Math.floor((sec % 86400) / 3600);
     const minutes = Math.floor((sec % 3600) / 60);
-
+    
     if (days > 0) return `${days}d ${hours}h ${minutes}m`;
     if (hours > 0) return `${hours}h ${minutes}m`;
     return `${minutes}m`;
@@ -56,17 +45,13 @@ export const Dashboard: React.FC = () => {
           <h1 className="text-2xl font-bold text-white">Dashboard</h1>
           <p className="text-gray-400 mt-1">Monitor your WireGuard server and clients</p>
         </motion.div>
-
+        
         <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           className="flex items-center space-x-2 mt-4 sm:mt-0"
         >
-          <div
-            className={`w-3 h-3 rounded-full ${
-              stats.status === '1' ? 'bg-green-400' : 'bg-red-400'
-            } ${statsLoading ? 'animate-pulse' : ''}`}
-          />
+          <div className={`w-3 h-3 rounded-full ${stats.status === '1' ? 'bg-green-400' : 'bg-red-400'} ${statsLoading ? 'animate-pulse' : ''}`} />
           <span className="text-sm text-gray-400">
             Server {statsLoading ? 'Loading...' : stats.status === '1' ? 'Running' : 'Stopped'}
           </span>
