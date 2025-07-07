@@ -1,5 +1,5 @@
+// Frontend/src/hooks/useApi.ts
 import { useState, useEffect, useCallback } from 'react';
-import { FlaskResponse } from '@/config/api';
 
 interface UseApiOptions<T> {
   immediate?: boolean;
@@ -8,11 +8,11 @@ interface UseApiOptions<T> {
 }
 
 export function useApi<T>(
-  apiCall: () => Promise<FlaskResponse<T>>,
+  apiCall: () => Promise<T>, // Changed this line: Expects a Promise that resolves directly to type T
   options: UseApiOptions<T> = {}
 ) {
   const { immediate = true, onSuccess, onError } = options;
-  
+
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,17 +21,13 @@ export function useApi<T>(
     try {
       setLoading(true);
       setError(null);
-      
-      const response = await apiCall();
-      
-      if (response.success && response.data !== undefined) {
-        setData(response.data);
-        onSuccess?.(response.data);
-      } else {
-        const errorMessage = response.message || 'Unknown error';
-        setError(errorMessage);
-        onError?.(errorMessage);
-      }
+
+      // The apiCall function is now expected to return the direct data (T)
+      // and handle the FlaskResponse unwrapping internally, as implemented in serverService.ts
+      const resultData = await apiCall();
+
+      setData(resultData);
+      onSuccess?.(resultData);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
@@ -61,11 +57,11 @@ export function useApi<T>(
 }
 
 export function useMutation<T, P = any>(
-  apiCall: (params: P) => Promise<FlaskResponse<T>>,
+  apiCall: (params: P) => Promise<T>, // Changed this line: Expects a Promise that resolves directly to type T
   options: UseApiOptions<T> = {}
 ) {
   const { onSuccess, onError } = options;
-  
+
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,19 +70,14 @@ export function useMutation<T, P = any>(
     try {
       setLoading(true);
       setError(null);
-      
-      const response = await apiCall(params);
-      
-      if (response.success && response.data !== undefined) {
-        setData(response.data);
-        onSuccess?.(response.data);
-        return response.data;
-      } else {
-        const errorMessage = response.message || 'Unknown error';
-        setError(errorMessage);
-        onError?.(errorMessage);
-        throw new Error(errorMessage);
-      }
+
+      // The apiCall function is now expected to return the direct data (T)
+      // and handle the FlaskResponse unwrapping internally.
+      const resultData = await apiCall(params);
+
+      setData(resultData);
+      onSuccess?.(resultData);
+      return resultData;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
