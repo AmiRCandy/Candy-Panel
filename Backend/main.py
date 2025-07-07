@@ -1,6 +1,7 @@
 # main_flask.py
 from flask import Flask, request, jsonify, abort, g , send_from_directory
 from functools import wraps
+from flask_cors import CORS
 import asyncio
 import json
 from datetime import datetime
@@ -15,7 +16,7 @@ candy_panel = CandyPanel()
 # --- Flask Application Setup ---
 app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/')
 app.config['SECRET_KEY'] = 'your_super_secret_key' # Replace with a strong, random key in production
-
+CORS(app)
 # --- Authentication Decorator ---
 def authenticate_admin(f):
     @wraps(f)
