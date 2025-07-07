@@ -48,8 +48,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Check system status on startup
   const checkSystemStatus = async (): Promise<'admin' | 'install'> => {
     try {
-      const response = await apiService.post(API_CONFIG.ENDPOINTS.INSTALL_STATUS);
-      return response.data?.type || 'admin';
+      // Change to apiService.get as /check is a GET endpoint
+      const response = await apiService.get<any>(API_CONFIG.ENDPOINTS.CHECK_INSTALLATION);
+      // Directly check the 'installed' property from the response data
+      if (response.success && response.data?.installed === false) {
+        return 'install';
+      }
+      return 'admin';
     } catch (error) {
       console.error('Failed to check system status:', error);
       return 'admin'; // Default to admin if check fails
