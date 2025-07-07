@@ -1,7 +1,7 @@
 // API Configuration for Flask Backend
 export const API_CONFIG = {
   // Backend base URL - change this to your Flask backend address
-  BASE_URL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3446',
+  BASE_URL: import.meta.env.VITE_APP_API_URL || 'http://localhost:3446',
   
   // API endpoints matching your Flask backend
   ENDPOINTS: {
