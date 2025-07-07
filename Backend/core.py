@@ -213,7 +213,8 @@ class CandyPanel:
         """
         if not self._is_valid_ip(server_ip):
             return False, 'IP INCORRECT'
-        if bool(self.db.get('settings',where={'key':'install'})) : return False , 'Installed before !'
+        install_status = self.db.get('settings',where={'key':'install'})
+        if bool(install_status and install_status['value'] == '1') : return False , 'Installed before !'
         print("[+] Updating system and installing WireGuard...")
         try:
             self.run_command("sudo apt update")
