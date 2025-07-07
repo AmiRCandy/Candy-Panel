@@ -268,7 +268,7 @@ configure_frontend_api_url() {
     fi
 
     # API URL now points directly to Flask's address
-    local frontend_api_url="http://$server_ip:$BACKEND_PORT"
+    local frontend_api_url="http://$server_ip:$BACKEND_PORT/api"
 
     print_info "Writing frontend environment variable VITE_APP_API_URL to .env.production..."
     echo "export VITE_APP_API_URL=$frontend_api_url" | sudo tee "$FRONTEND_DIR/.env.production" > /dev/null || { print_error "Failed to write .env.production file. Check permissions."; exit 1; }
