@@ -7,6 +7,7 @@ import { serverService } from '@/services/serverService';
 
 export const Dashboard: React.FC = () => {
   // Fetch server stat
+  let statsLoading  = true;
   const stats = serverService.getDashboardStats() || {
     cpu: '0%',
     mem: { usage: '0%' },
@@ -15,7 +16,7 @@ export const Dashboard: React.FC = () => {
     uptime: '0',
     net: { download: '0 KB/s', upload: '0 KB/s' }
   };
-
+  statsLoading = false;
   const formatUptime = (seconds: string) => {
     const sec = parseInt(seconds);
     const days = Math.floor(sec / 86400);
