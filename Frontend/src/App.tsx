@@ -33,7 +33,8 @@ const PageTransition: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
-  
+    console.log('AppContent: Render. isLoading:', isLoading, 'isFirstTime:', isFirstTime, 'isAuthenticated:', isAuthenticated);
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -52,9 +53,10 @@ const AppContent: React.FC = () => {
   const { isAuthenticated, isFirstTime, completeSetup } = useAuth();
   
   if (isFirstTime) {
+     console.log('AppContent: Displaying InstallationWizard.');
     return <InstallationWizard onComplete={completeSetup} />;
   }
-  
+  console.log('AppContent: Displaying Main Application Routes.');
   return (
     <div className="min-h-screen bg-black">
       <Router>
