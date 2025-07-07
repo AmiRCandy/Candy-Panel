@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Calendar, Clock, FileText, Smartphone, Loader } from 'lucide-react';
+import { X, Calendar, FileText, Smartphone, Loader } from 'lucide-react';
 import { Client } from '@/types';
 
 interface ClientFormProps {

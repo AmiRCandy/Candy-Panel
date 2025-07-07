@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { FileText, Download, Eye, EyeOff, Plus, Edit, Trash2, Loader } from 'lucide-react';
+import { FileText, Download, Eye, EyeOff, Plus, Edit, Loader } from 'lucide-react';
 import { useApi, useMutation } from '@/hooks/useApi';
 import { interfaceService } from '@/services/interfaceService';
 import { Interface } from '@/types';

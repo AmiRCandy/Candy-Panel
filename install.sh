@@ -13,6 +13,9 @@ GUNICORN_SOCK="/tmp/${PROJECT_NAME}_fastapi.sock"
 NGINX_CONF_PATH="/etc/nginx/sites-available/$PROJECT_NAME"
 NGINX_SYMLINK_PATH="/etc/nginx/sites-enabled/$PROJECT_NAME"
 GUNICORN_LOG_DIR="/var/log/gunicorn"
+# NVM specific
+NVM_VERSION="v0.40.3" # Always check https://github.com/nvm-sh/nvm for the latest version
+NODE_VERSION="22" # Install Node.js v22.x.x
 
 # --- Styling Functions ---
 GREEN='\e[32m'
@@ -26,7 +29,7 @@ UNDERLINE='\e[4m'
 
 print_header() {
     echo -e "\n${BOLD}${CYAN}====================================================${RESET}"
-    echo -e "${BOLD}${CYAN}  Candy Panel Deployment Script             ${RESET}"
+    echo -e "${BOLD}${CYAN}  Candy Panel Deployment Script                     ${RESET}"
     echo -e "${BOLD}${CYAN}====================================================${RESET}"
     echo -e "${BOLD}${YELLOW}  Project: $PROJECT_NAME${RESET}"
     echo -e "${BOLD}${YELLOW}  Repo: $REPO_URL${RESET}"
@@ -64,7 +67,8 @@ confirm_action() {
 check_prerequisites() {
     print_info "Checking for required system packages..."
     local missing_packages=()
-    for cmd in git python3 npm nginx ufw certbot python3.10-venv; do
+    # Removed 'npm' from this list as it will be installed via NVM
+    for cmd in git python3 nginx ufw certbot python3.10-venv curl; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_packages+=("$cmd")
         fi
@@ -98,10 +102,54 @@ check_prerequisites() {
             print_success "Missing packages installed successfully."
         fi
     else
-        print_success "All required packages found."
+        print_success "All required system packages found."
     fi
     sleep 1
 }
+
+install_nodejs_with_nvm() {
+    print_info "--- Installing Node.js and npm using NVM ---"
+    sleep 1
+
+    # Check if NVM is already installed
+    if [ -s "$HOME/.nvm/nvm.sh" ]; then
+        print_warning "NVM appears to be already installed. Sourcing it..."
+        . "$HOME/.nvm/nvm.sh" # Source NVM
+    else
+        print_info "Installing NVM (Node Version Manager)..."
+        # Download and run the NVM installation script
+        curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_VERSION/install.sh" | bash || { print_error "Failed to download and install NVM."; exit 1; }
+        
+        # Source NVM script to make 'nvm' command available in the current session
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+        
+        # Verify NVM is sourced
+        if ! command -v nvm &> /dev/null; then
+            print_error "NVM command not found after installation and sourcing. Please check NVM installation manually."
+            exit 1
+        fi
+        print_success "NVM installed successfully."
+    fi
+
+    print_info "Installing Node.js v${NODE_VERSION} (and bundled npm)..."
+    nvm install "$NODE_VERSION" || { print_error "Failed to install Node.js v${NODE_VERSION}."; exit 1; }
+    print_success "Node.js v${NODE_VERSION} and npm installed."
+
+    print_info "Setting Node.js v${NODE_VERSION} as the default version..."
+    nvm alias default "$NODE_VERSION" || { print_error "Failed to set default Node.js version."; exit 1; }
+    print_success "Node.js v${NODE_VERSION} set as default."
+
+    print_info "Using Node.js v${NODE_VERSION} for current session..."
+    nvm use "$NODE_VERSION" || { print_error "Failed to switch to Node.js v${NODE_VERSION}."; exit 1; }
+    print_success "Node.js v${NODE_VERSION} is now active."
+
+    node -v
+    npm -v
+    sleep 1
+}
+
 
 clone_or_update_repo() {
     print_header
@@ -112,13 +160,21 @@ clone_or_update_repo() {
         print_warning "Project directory '$PROJECT_ROOT' already exists."
         confirm_action "Do you want to pull the latest changes from the repository?"
         print_info "Navigating to $PROJECT_ROOT and pulling latest changes..."
-        cd "$PROJECT_ROOT" || { print_error "Failed to change directory to $PROJECT_ROOT"; exit 1; }
-        sudo git pull origin main || sudo git pull origin master # Adjust branch if needed
+        # Use sudo for git operations in /var/www if the script is run by a non-root user
+        # that doesn't own /var/www/$PROJECT_NAME. It's generally better to set correct permissions
+        # so the LINUX_USER owns the project directory.
+        sudo git -C "$PROJECT_ROOT" pull origin main || sudo git -C "$PROJECT_ROOT" pull origin master # Adjust branch if needed
+        if [ $? -ne 0 ]; then
+            print_error "Failed to pull latest changes from repository. Check permissions or network."
+            exit 1
+        fi
         print_success "Repository updated."
     else
         print_info "Cloning repository '$REPO_URL' into '$PROJECT_ROOT'..."
         sudo mkdir -p "$(dirname "$PROJECT_ROOT")" || { print_error "Failed to create parent directory for $PROJECT_ROOT"; exit 1; }
         sudo git clone "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
+        # Ensure the current user (or the user specified by LINUX_USER) owns the cloned directory
+        sudo chown -R "$LINUX_USER:$LINUX_USER" "$PROJECT_ROOT" || { print_warning "Could not change ownership of $PROJECT_ROOT to $LINUX_USER. Manual intervention might be needed for permissions."; }
         print_success "Repository cloned successfully."
     fi
     sleep 1
@@ -145,6 +201,7 @@ deploy_backend() {
 
     print_info "Creating Gunicorn configuration file..."
     sudo mkdir -p "$GUNICORN_LOG_DIR" || { print_error "Failed to create Gunicorn log directory."; exit 1; }
+    # Ensure gunicorn_config.py is owned by the user running the script if it needs to be modified by them
     sudo tee gunicorn_config.py > /dev/null <<EOF
 # gunicorn_config.py
 import multiprocessing
@@ -159,6 +216,8 @@ timeout = 120
 keepalive = 5
 EOF
     print_success "Gunicorn configuration created."
+    # Fix permissions for the config file if tee created it as root
+    sudo chown "$LINUX_USER:$LINUX_USER" gunicorn_config.py
     sleep 1
 
     print_info "Creating Systemd service file for FastAPI..."
@@ -199,13 +258,23 @@ deploy_frontend() {
     print_info "Navigating to frontend directory: $FRONTEND_DIR"
     cd "$FRONTEND_DIR" || { print_error "Frontend directory not found: $FRONTEND_DIR"; exit 1; }
 
+    # Ensure NVM is sourced again for this subshell if not already
+    if [ -s "$HOME/.nvm/nvm.sh" ]; then
+        . "$HOME/.nvm/nvm.sh" # Source NVM
+        nvm use "$NODE_VERSION" || print_warning "Could not activate Node.js v${NODE_VERSION} with nvm in this subshell. Continuing anyway."
+    else
+        print_error "NVM not found or not sourced. Node.js/npm commands might fail. Did install_nodejs_with_nvm run successfully?"
+        exit 1
+    fi
+
+
     print_info "Installing Node.js dependencies..."
-    npm install || { print_error "Failed to install Node.js dependencies."; exit 1; }
+    npm install || { print_error "Failed to install Node.js dependencies. Check npm logs and internet connection."; exit 1; }
     print_success "Node.js dependencies installed."
     sleep 1
 
     print_info "Building React Vite frontend for production..."
-    npm run build || { print_error "Failed to build React Vite frontend. Check your package.json 'build' script."; exit 1; }
+    npm run build || { print_error "Failed to build React Vite frontend. Check your package.json 'build' script and Node.js environment."; exit 1; }
     print_success "Frontend built successfully. Static files are in '$FRONTEND_DIR/dist'."
     sleep 2
 }
@@ -305,6 +374,8 @@ setup_ssl() {
 
     confirm_action "Do you want to set up HTTPS with Let's Encrypt for $domain_name?"
     print_info "Running Certbot to obtain and install SSL certificate..."
+    # Ensure Nginx is allowing traffic on ports 80/443 for Certbot to work, even if your app uses 3445
+    # Certbot needs to verify domain ownership via standard HTTP/HTTPS ports.
     sudo certbot --nginx -d "$domain_name" -d "www.$domain_name" || { print_error "Certbot failed. Check DNS records and Nginx configuration."; return; }
     print_success "SSL certificate obtained and installed successfully!"
     print_info "Your site should now be accessible via HTTPS."
@@ -317,6 +388,7 @@ main() {
     confirm_action "This script will deploy your Candy panel. Ensure you have updated the REPO_URL variable in the script."
 
     check_prerequisites
+    install_nodejs_with_nvm # NEW STEP: Install Node.js/npm with NVM
     clone_or_update_repo
     deploy_backend
     deploy_frontend
@@ -325,7 +397,7 @@ main() {
     setup_ssl
 
     echo -e "\n${BOLD}${GREEN}====================================================${RESET}"
-    echo -e "${BOLD}${GREEN}  Deployment Complete!                              ${RESET}"
+    echo -e "${BOLD}${GREEN}  Deployment Complete!                                ${RESET}"
     echo -e "${BOLD}${GREEN}====================================================${RESET}"
     local final_domain=$(cat /tmp/${PROJECT_NAME}_domain.txt 2>/dev/null)
     if [ -n "$final_domain" ] && ! [[ "$final_domain" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
@@ -333,8 +405,9 @@ main() {
         echo -e "${BOLD}${GREEN}  https://$final_domain${RESET}"
     else
         echo -e "${BOLD}${GREEN}  Your Candy Panel should now be accessible at:${RESET}"
-        echo -e "${BOLD}${GREEN}  http://YOUR_SERVER_IP${RESET}"
+        echo -e "${BOLD}${GREEN}  http://YOUR_SERVER_IP:3445${RESET}" # Adjusted to reflect Nginx listening on 3445
         print_warning "Remember to replace YOUR_SERVER_IP with your actual server's public IP address."
+        print_warning "Note: If using an IP, SSL will not be configured."
     fi
     echo -e "${BOLD}${GREEN}====================================================${RESET}\n"
     print_info "Ensure the Linux user '$LINUX_USER' has appropriate permissions for WireGuard operations."

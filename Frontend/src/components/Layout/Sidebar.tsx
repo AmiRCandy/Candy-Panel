@@ -1,6 +1,5 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { Home, Users, Server, Settings, FileText, Shield, Zap, LogOut, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 

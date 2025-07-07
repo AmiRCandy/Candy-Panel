@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Users, Server, Activity, Download, Upload, Globe } from 'lucide-react';
+import { Users, Server, Activity, Download, Globe } from 'lucide-react';
 import { StatsCard } from '@/components/Dashboard/StatsCard';
 import { BandwidthChart } from '@/components/Dashboard/BandwidthChart';
 import { ClientsTable } from '@/components/Dashboard/ClientsTable';

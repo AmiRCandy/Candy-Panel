@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Settings as SettingsIcon, User, Shield, Bell, Palette, Download, Upload } from 'lucide-react';
+import { Settings as SettingsIcon, User, Shield, Download, Upload } from 'lucide-react';
 import { BackendConfig } from '@/components/Settings/BackendConfig';
 
 export const Settings: React.FC = () => {

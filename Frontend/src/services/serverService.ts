@@ -1,6 +1,6 @@
 import { apiService } from './api';
 import { API_CONFIG } from '@/config/api';
-import { ServerStats, ServerConfig } from '@/types';
+import { ServerStats } from '@/types';
 
 class ServerService {
   async getDashboardStats(): Promise<ServerStats> {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Server as ServerIcon, Settings, Shield, Loader } from 'lucide-react';
+import { Server as ServerIcon, Shield, Loader } from 'lucide-react';
 import { useApi, useMutation } from '@/hooks/useApi';
 import { serverService } from '@/services/serverService';
 

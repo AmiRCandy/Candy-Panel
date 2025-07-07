@@ -1,4 +1,4 @@
-import { API_CONFIG, ApiResponse, PaginatedResponse } from '@/config/api';
+import { API_CONFIG, ApiResponse } from '@/config/api';
 
 class ApiService {
   private baseURL: string;
