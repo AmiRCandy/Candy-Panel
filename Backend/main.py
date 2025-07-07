@@ -72,7 +72,7 @@ async def handle_auth():
 
     action = data['action']
     install_status = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'install'})
-    is_installed = bool(install_status and install_status['value'] == '1')
+    is_installed = bool(install_status['value'])
 
     if action == 'login':
         if not is_installed:
