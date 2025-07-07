@@ -50,7 +50,7 @@ def error_response(message: str, status_code: int = 400):
 
 # --- API Endpoints ---
 
-@app.post("/login")
+@app.post("/api/login")
 async def login():
     """
     Authenticates an admin user and returns a session token.
@@ -71,7 +71,7 @@ async def login():
         return jsonify({"type": "install"})
 
 
-@app.post("/install")
+@app.post("/api/install")
 async def install_candypanel():
     """
     Performs the initial installation of WireGuard and CandyPanel configuration.
@@ -104,7 +104,7 @@ async def install_candypanel():
         return error_response(message, 400)
     return success_response(message)
 
-@app.get("/dashboard")
+@app.get("/api/dashboard")
 @authenticate_admin
 async def get_dashboard_stats():
     """
@@ -114,7 +114,7 @@ async def get_dashboard_stats():
     stats = await asyncio.to_thread(candy_panel._dashboard_stats)
     return jsonify(stats)
 
-@app.post("/sync")
+@app.post("/api/sync")
 @authenticate_admin
 async def trigger_sync():
     """
@@ -130,7 +130,7 @@ async def trigger_sync():
 
 # --- Client Management ---
 
-@app.get("/clients")
+@app.get("/api/clients")
 @authenticate_admin
 async def get_all_clients():
     """
@@ -146,7 +146,7 @@ async def get_all_clients():
             client['used_trafic'] = {"download": 0, "upload": 0}
     return jsonify(clients_data)
 
-@app.post("/clients")
+@app.post("/api/clients")
 @authenticate_admin
 async def create_new_client():
     """
@@ -178,7 +178,7 @@ async def create_new_client():
         return error_response(message, 400)
     return success_response("Client created successfully!", data={"client_config": message})
 
-@app.get("/clients/<string:client_name>")
+@app.get("/api/clients/<string:client_name>")
 @authenticate_admin
 async def get_client_by_name(client_name: str):
     """
@@ -194,7 +194,7 @@ async def get_client_by_name(client_name: str):
         client_data['used_trafic'] = {"download": 0, "upload": 0}
     return jsonify(client_data)
 
-@app.put("/clients/<string:client_name>")
+@app.put("/api/clients/<string:client_name>")
 @authenticate_admin
 async def update_client_details(client_name: str):
     """
@@ -222,7 +222,7 @@ async def update_client_details(client_name: str):
         return error_response(message, 400)
     return success_response(message)
 
-@app.delete("/clients/<string:client_name>")
+@app.delete("/api/clients/<string:client_name>")
 @authenticate_admin
 async def delete_client(client_name: str):
     """
@@ -234,7 +234,7 @@ async def delete_client(client_name: str):
         return error_response(message, 400)
     return success_response(message)
 
-@app.get("/clients/<string:client_name>/config")
+@app.get("/api/clients/<string:client_name>/config")
 @authenticate_admin
 async def get_client_config(client_name: str):
     """
@@ -248,7 +248,7 @@ async def get_client_config(client_name: str):
 
 # --- Interface Management ---
 
-@app.get("/interfaces")
+@app.get("/api/interfaces")
 @authenticate_admin
 async def get_all_interfaces():
     """
@@ -258,7 +258,7 @@ async def get_all_interfaces():
     interfaces_data = await asyncio.to_thread(candy_panel.db.select, 'interfaces')
     return jsonify(interfaces_data)
 
-@app.post("/interfaces")
+@app.post("/api/interfaces")
 @authenticate_admin
 async def create_new_interface():
     """
@@ -283,7 +283,7 @@ async def create_new_interface():
         return error_response(message, 400)
     return success_response(message)
 
-@app.put("/interfaces/<string:interface_name>")
+@app.put("/api/interfaces/<string:interface_name>")
 @authenticate_admin
 async def update_interface_details(interface_name: str):
     """
@@ -311,7 +311,7 @@ async def update_interface_details(interface_name: str):
 
 # --- Settings Management ---
 
-@app.get("/settings")
+@app.get("/api/settings")
 @authenticate_admin
 async def get_all_settings():
     """
@@ -322,7 +322,7 @@ async def get_all_settings():
     # Convert list of dicts to a single dict for easier consumption
     return jsonify({setting['key']: setting['value'] for setting in settings_data})
 
-@app.put("/settings/<string:key>")
+@app.put("/api/settings/<string:key>")
 @authenticate_admin
 async def update_setting(key: str):
     """
@@ -341,7 +341,7 @@ async def update_setting(key: str):
 
 # --- API Token Management ---
 
-@app.post("/api-tokens")
+@app.post("/api/api-tokens")
 @authenticate_admin
 async def create_or_update_api_token():
     """
@@ -359,7 +359,7 @@ async def create_or_update_api_token():
         return error_response(message, 400)
     return success_response(message)
 
-@app.delete("/api-tokens/<string:name>")
+@app.delete("/api/api-tokens/<string:name>")
 @authenticate_admin
 async def delete_api_token(name: str):
     """
@@ -371,7 +371,7 @@ async def delete_api_token(name: str):
         return error_response(message, 400)
     return success_response(message)
 
-@app.get("/api-tokens/<string:name>")
+@app.get("/api/api-tokens/<string:name>")
 @authenticate_admin
 async def get_api_token(name: str):
     """
