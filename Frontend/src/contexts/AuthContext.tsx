@@ -58,42 +58,60 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     const initializeAuth = async () => {
+      console.log('AuthContext: initializeAuth started');
+      setIsLoading(true); // Ensure loading is true at the very start of init
+
       try {
-        // Load saved backend URL
         const savedBackendUrl = localStorage.getItem('candy-panel-backend-url');
         if (savedBackendUrl) {
           apiService.setBaseURL(savedBackendUrl);
+          console.log('AuthContext: Backend URL set to', savedBackendUrl);
         }
 
-        // Check system status
         const systemStatus = await checkSystemStatus();
-        
+        console.log('AuthContext: System Status API response (installed):', systemStatus);
+
         if (systemStatus === 'install') {
           setIsFirstTime(true);
-          setIsLoading(false);
-          return;
-        } else {
+          console.log('AuthContext: Setting isFirstTime to TRUE');
+          // No return here, let finally block handle setIsLoading(false)
+        } else { // systemStatus === 'admin'
           setIsFirstTime(false);
+          console.log('AuthContext: Setting isFirstTime to FALSE');
         }
 
-        // Check if user is authenticated
-        const token = localStorage.getItem('candy-panel-token');
-        const userData = localStorage.getItem('candy-panel-user');
-        
-        if (token && userData) {
-          try {
-            const parsedUser = JSON.parse(userData);
-            setUser(parsedUser);
-          } catch (error) {
-            console.error('Failed to parse user data:', error);
-            localStorage.removeItem('candy-panel-token');
-            localStorage.removeItem('candy-panel-user');
+        // Check if user is authenticated (only if not in install mode)
+        if (systemStatus === 'admin') {
+          const token = localStorage.getItem('candy-panel-token');
+          const userData = localStorage.getItem('candy-panel-user');
+
+          if (token && userData) {
+            try {
+              const parsedUser = JSON.parse(userData);
+              setUser(parsedUser);
+              console.log('AuthContext: User authenticated:', parsedUser.username);
+            } catch (error) {
+              console.error('AuthContext: Failed to parse user data:', error);
+              localStorage.removeItem('candy-panel-token');
+              localStorage.removeItem('candy-panel-user');
+              setUser(null); // Ensure user is null on parse error
+            }
+          } else {
+            console.log('AuthContext: No token or user data found, user not authenticated.');
+            setUser(null);
           }
+        } else {
+            console.log('AuthContext: System not installed, skipping user authentication check.');
+            setUser(null); // Ensure user is null if system is not installed
         }
+
       } catch (error) {
-        console.error('Auth initialization failed:', error);
+        console.error('AuthContext: Auth initialization failed:', error);
+        setIsFirstTime(true); // If initialization itself fails, assume install needed
+        setUser(null);
       } finally {
         setIsLoading(false);
+        console.log('AuthContext: setIsLoading to FALSE, Final isFirstTime:', isFirstTime);
       }
     };
 
