@@ -64,7 +64,7 @@ confirm_action() {
 check_prerequisites() {
     print_info "Checking for required system packages..."
     local missing_packages=()
-    for cmd in git python3 npm nginx ufw certbot; do
+    for cmd in git python3 npm nginx ufw certbot python3.10-venv; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_packages+=("$cmd")
         fi
@@ -138,8 +138,8 @@ deploy_backend() {
     print_success "Virtual environment activated."
     sleep 1
 
-    print_info "Installing Python dependencies: fastapi, psutil, shutil, requests, pyrogram, uvicorn[standard], gunicorn..."
-    pip install fastapi psutil shutil requests pyrogram "uvicorn[standard]" gunicorn || { print_error "Failed to install Python dependencies."; exit 1; }
+    print_info "Installing Python dependencies: fastapi, psutil, requests, pyrogram, uvicorn[standard], gunicorn..."
+    pip install fastapi psutil requests pyrogram "uvicorn[standard]" gunicorn || { print_error "Failed to install Python dependencies."; exit 1; }
     print_success "Python dependencies installed."
     sleep 1
 
