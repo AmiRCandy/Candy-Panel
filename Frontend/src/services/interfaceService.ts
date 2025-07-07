@@ -4,52 +4,46 @@ import { Interface } from '@/types';
 
 class InterfaceService {
   async getInterfaces(): Promise<Interface[]> {
-    const response = await apiService.get<Interface[]>(API_CONFIG.ENDPOINTS.INTERFACES);
-    return response.data || [];
+    const response = await apiService.get<any>(API_CONFIG.ENDPOINTS.GET_ALL_DATA);
+    return response.data?.interfaces || [];
   }
 
   async createInterface(interfaceData: {
     address_range: string;
     port: number;
-  }): Promise<Interface> {
-    const response = await apiService.post<Interface>(
-      API_CONFIG.ENDPOINTS.INTERFACES,
-      interfaceData
+  }): Promise<void> {
+    const response = await apiService.post<any>(
+      API_CONFIG.ENDPOINTS.MANAGE,
+      {
+        resource: 'interface',
+        action: 'create',
+        address_range: interfaceData.address_range,
+        port: interfaceData.port
+      }
     );
     
-    if (response.success && response.data) {
-      return response.data;
+    if (!response.success) {
+      throw new Error(response.message || 'Failed to create interface');
     }
-    
-    throw new Error(response.message || 'Failed to create interface');
   }
 
   async updateInterface(name: string, interfaceData: {
     address?: string;
     port?: number;
     status?: boolean;
-  }): Promise<Interface> {
-    const response = await apiService.put<Interface>(
-      API_CONFIG.ENDPOINTS.INTERFACE_BY_NAME,
-      interfaceData,
-      { name }
-    );
-    
-    if (response.success && response.data) {
-      return response.data;
-    }
-    
-    throw new Error(response.message || 'Failed to update interface');
-  }
-
-  async deleteInterface(name: string): Promise<void> {
-    const response = await apiService.delete(
-      API_CONFIG.ENDPOINTS.INTERFACE_BY_NAME,
-      { name }
+  }): Promise<void> {
+    const response = await apiService.post<any>(
+      API_CONFIG.ENDPOINTS.MANAGE,
+      {
+        resource: 'interface',
+        action: 'update',
+        name,
+        ...interfaceData
+      }
     );
     
     if (!response.success) {
-      throw new Error(response.message || 'Failed to delete interface');
+      throw new Error(response.message || 'Failed to update interface');
     }
   }
 }

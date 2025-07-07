@@ -1,4 +1,4 @@
-import { API_CONFIG, ApiResponse } from '@/config/api';
+import { API_CONFIG, FlaskResponse } from '@/config/api';
 
 class ApiService {
   private baseURL: string;
@@ -34,38 +34,24 @@ class ApiService {
     return headers;
   }
 
-  // Build full URL
-  private buildURL(endpoint: string, params?: Record<string, string>): string {
-    let url = `${this.baseURL}${endpoint}`;
-    
-    // Replace URL parameters
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        url = url.replace(`:${key}`, value);
-      });
-    }
-    
-    return url;
-  }
-
   // Generic request method
   private async request<T>(
     method: string,
     endpoint: string,
     options: {
       data?: any;
-      params?: Record<string, string>;
       headers?: Record<string, string>;
       timeout?: number;
+      requireAuth?: boolean;
     } = {}
-  ): Promise<ApiResponse<T>> {
-    const { data, params, headers = {}, timeout = this.timeout } = options;
+  ): Promise<FlaskResponse<T>> {
+    const { data, headers = {}, timeout = this.timeout, requireAuth = false } = options;
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
     
     try {
-      const url = this.buildURL(endpoint, params);
+      const url = `${this.baseURL}${endpoint}`;
       const requestHeaders = this.buildHeaders(headers);
       
       console.log(`🌐 API Request: ${method} ${url}`);
@@ -85,25 +71,16 @@ class ApiService {
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }
       
       const result = await response.json();
       
-      // Handle your backend's response format
-      if (result.success !== undefined) {
-        return {
-          success: result.success,
-          data: result.data || result,
-          message: result.message
-        };
-      }
-      
-      // For endpoints that return data directly
+      // Handle Flask response format
       return {
-        success: true,
-        data: result,
-        message: 'Request successful'
+        success: result.success || false,
+        message: result.message || 'Request successful',
+        data: result.data
       };
     } catch (error) {
       clearTimeout(timeoutId);
@@ -120,24 +97,20 @@ class ApiService {
   }
 
   // HTTP methods
-  async get<T>(endpoint: string, params?: Record<string, string>): Promise<ApiResponse<T>> {
-    return this.request<T>('GET', endpoint, { params });
+  async get<T>(endpoint: string): Promise<FlaskResponse<T>> {
+    return this.request<T>('GET', endpoint, { requireAuth: true });
   }
 
-  async post<T>(endpoint: string, data?: any, params?: Record<string, string>): Promise<ApiResponse<T>> {
-    return this.request<T>('POST', endpoint, { data, params });
+  async post<T>(endpoint: string, data?: any): Promise<FlaskResponse<T>> {
+    return this.request<T>('POST', endpoint, { data });
   }
 
-  async put<T>(endpoint: string, data?: any, params?: Record<string, string>): Promise<ApiResponse<T>> {
-    return this.request<T>('PUT', endpoint, { data, params });
+  async put<T>(endpoint: string, data?: any): Promise<FlaskResponse<T>> {
+    return this.request<T>('PUT', endpoint, { data, requireAuth: true });
   }
 
-  async delete<T>(endpoint: string, params?: Record<string, string>): Promise<ApiResponse<T>> {
-    return this.request<T>('DELETE', endpoint, { params });
-  }
-
-  async patch<T>(endpoint: string, data?: any, params?: Record<string, string>): Promise<ApiResponse<T>> {
-    return this.request<T>('PATCH', endpoint, { data, params });
+  async delete<T>(endpoint: string): Promise<FlaskResponse<T>> {
+    return this.request<T>('DELETE', endpoint, { requireAuth: true });
   }
 }
 

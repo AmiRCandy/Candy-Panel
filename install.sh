@@ -189,7 +189,7 @@ deploy_backend() {
 
     print_info "Installing Python dependencies (Flask etc.)..."
     # Assuming requirements.txt exists and contains all necessary packages
-    pip install pyrogram flask requests flask_cors psutil || { print_error "Failed to install Python dependencies."; exit 1; }
+    pip install pyrogram flask[async] requests flask_cors psutil || { print_error "Failed to install Python dependencies."; exit 1; }
     print_success "Python dependencies installed."
     sleep 1
 

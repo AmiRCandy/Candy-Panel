@@ -4,8 +4,8 @@ import { Client } from '@/types';
 
 class ClientService {
   async getClients(): Promise<Client[]> {
-    const response = await apiService.get<Client[]>(API_CONFIG.ENDPOINTS.CLIENTS);
-    return response.data || [];
+    const response = await apiService.get<any>(API_CONFIG.ENDPOINTS.GET_ALL_DATA);
+    return response.data?.clients || [];
   }
 
   async createClient(clientData: {
@@ -14,10 +14,12 @@ class ClientService {
     traffic: string;
     wg_id?: number;
     note?: string;
-  }): Promise<Client> {
+  }): Promise<string> {
     const response = await apiService.post<any>(
-      API_CONFIG.ENDPOINTS.CLIENTS,
+      API_CONFIG.ENDPOINTS.MANAGE,
       {
+        resource: 'client',
+        action: 'create',
         name: clientData.name,
         expires: clientData.expires,
         traffic: clientData.traffic,
@@ -27,7 +29,7 @@ class ClientService {
     );
     
     if (response.success) {
-      return response.data;
+      return response.data?.client_config || '';
     }
     
     throw new Error(response.message || 'Failed to create client');
@@ -38,24 +40,30 @@ class ClientService {
     traffic?: string;
     status?: boolean;
     note?: string;
-  }): Promise<Client> {
-    const response = await apiService.put<any>(
-      API_CONFIG.ENDPOINTS.CLIENT_BY_NAME,
-      clientData,
-      { name }
+  }): Promise<void> {
+    const response = await apiService.post<any>(
+      API_CONFIG.ENDPOINTS.MANAGE,
+      {
+        resource: 'client',
+        action: 'update',
+        name,
+        ...clientData
+      }
     );
     
-    if (response.success) {
-      return response.data;
+    if (!response.success) {
+      throw new Error(response.message || 'Failed to update client');
     }
-    
-    throw new Error(response.message || 'Failed to update client');
   }
 
   async deleteClient(name: string): Promise<void> {
-    const response = await apiService.delete(
-      API_CONFIG.ENDPOINTS.CLIENT_BY_NAME,
-      { name }
+    const response = await apiService.post(
+      API_CONFIG.ENDPOINTS.MANAGE,
+      {
+        resource: 'client',
+        action: 'delete',
+        name
+      }
     );
     
     if (!response.success) {
@@ -64,10 +72,14 @@ class ClientService {
   }
 
   async toggleClient(name: string, enabled: boolean): Promise<void> {
-    const response = await apiService.put(
-      API_CONFIG.ENDPOINTS.CLIENT_BY_NAME,
-      { status: enabled },
-      { name }
+    const response = await apiService.post(
+      API_CONFIG.ENDPOINTS.MANAGE,
+      {
+        resource: 'client',
+        action: 'update',
+        name,
+        status: enabled
+      }
     );
     
     if (!response.success) {
@@ -76,9 +88,13 @@ class ClientService {
   }
 
   async getClientConfig(name: string): Promise<string> {
-    const response = await apiService.get<{ config: string }>(
-      API_CONFIG.ENDPOINTS.CLIENT_CONFIG,
-      { name }
+    const response = await apiService.post<{ config: string }>(
+      API_CONFIG.ENDPOINTS.MANAGE,
+      {
+        resource: 'client',
+        action: 'get_config',
+        name
+      }
     );
     
     if (response.success && response.data) {

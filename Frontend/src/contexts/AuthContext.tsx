@@ -48,11 +48,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Check system status on startup
   const checkSystemStatus = async (): Promise<'admin' | 'install'> => {
     try {
-      const response = await apiService.post(API_CONFIG.ENDPOINTS.INSTALL_STATUS);
-      return response.data?.type || 'admin';
+      const response = await apiService.get(API_CONFIG.ENDPOINTS.CHECK_INSTALLATION);
+      return response.data?.installed ? 'admin' : 'install';
     } catch (error) {
       console.error('Failed to check system status:', error);
-      return 'admin'; // Default to admin if check fails
+      return 'install'; // Default to install if check fails
     }
   };
 
@@ -100,7 +100,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (credentials: LoginCredentials): Promise<boolean> => {
     try {
-      const response = await apiService.post(API_CONFIG.ENDPOINTS.LOGIN_AUTH, credentials);
+      const response = await apiService.post(API_CONFIG.ENDPOINTS.AUTH, {
+        action: 'login',
+        username: credentials.username,
+        password: credentials.password
+      });
       
       if (response.success && response.data?.access_token) {
         // Store token

@@ -224,8 +224,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🗺️ Roadmap
 
 - [ ] Telegram bot integration for automated sales
-- [ ] Backend with go for low resource usage
-- [ ] Optimizition
 - [ ] Advanced analytics and reporting
 - [ ] Docker containerization
 - [ ] Manual Port for panel and api

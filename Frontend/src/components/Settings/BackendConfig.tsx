@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Server, Check, AlertCircle, Loader } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiService } from '@/services/api';
+import { API_CONFIG } from '@/config/api';
 
 export const BackendConfig: React.FC = () => {
   const { setBackendUrl } = useAuth();
@@ -13,7 +14,7 @@ export const BackendConfig: React.FC = () => {
 
   useEffect(() => {
     // Load saved backend URL
-    const savedUrl = localStorage.getItem('candy-panel-backend-url') || 'http://localhost:8080/api';
+    const savedUrl = localStorage.getItem('candy-panel-backend-url') || 'http://localhost:3446';
     setUrl(savedUrl);
   }, []);
 
@@ -33,8 +34,8 @@ export const BackendConfig: React.FC = () => {
       const originalBaseURL = apiService['baseURL'];
       apiService.setBaseURL(url);
 
-      // Test connection with a simple health check
-      const response = await fetch(`${url}/health`, {
+      // Test connection with installation check
+      const response = await fetch(`${url}${API_CONFIG.ENDPOINTS.CHECK_INSTALLATION}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -98,8 +99,9 @@ export const BackendConfig: React.FC = () => {
                 setConnectionStatus('idle');
                 setErrorMessage('');
               }}
-              placeholder="http://localhost:8080/api"
+              placeholder="http://localhost:3446"
               className="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-gray-400 focus:border-blue-500 focus:outline-none backdrop-blur-sm"
+              disabled={testing}
             />
             <button
               onClick={testConnection}
@@ -146,25 +148,19 @@ export const BackendConfig: React.FC = () => {
 
         {/* API Endpoints Info */}
         <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-          <h4 className="text-white font-medium mb-3">Expected API Endpoints</h4>
+          <h4 className="text-white font-medium mb-3">Flask Backend Endpoints</h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
             <div className="text-gray-300">
-              <span className="text-green-400">GET</span> /health
+              <span className="text-green-400">GET</span> /check
             </div>
             <div className="text-gray-300">
-              <span className="text-blue-400">POST</span> /auth/login
+              <span className="text-blue-400">POST</span> /api/auth
             </div>
             <div className="text-gray-300">
-              <span className="text-blue-400">GET</span> /server/status
+              <span className="text-blue-400">GET</span> /api/data
             </div>
             <div className="text-gray-300">
-              <span className="text-blue-400">GET</span> /clients
-            </div>
-            <div className="text-gray-300">
-              <span className="text-blue-400">GET</span> /interfaces
-            </div>
-            <div className="text-gray-300">
-              <span className="text-blue-400">GET</span> /stats/bandwidth
+              <span className="text-blue-400">POST</span> /api/manage
             </div>
           </div>
         </div>

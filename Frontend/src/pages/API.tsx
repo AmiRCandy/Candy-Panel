@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Zap, Key, Copy, Plus, Trash2, Eye, EyeOff, Loader } from 'lucide-react';
 import { useApi, useMutation } from '@/hooks/useApi';
-import { apiService } from '@/services/api';
-import { API_CONFIG } from '@/config/api';
+import { serverService } from '@/services/serverService';
 
 export const API: React.FC = () => {
   const [showTokens, setShowTokens] = useState<{ [key: string]: boolean }>({});
@@ -13,7 +12,7 @@ export const API: React.FC = () => {
 
   // Fetch API tokens from settings
   const { data: settings = {}, loading, error, refetch } = useApi(
-    () => apiService.get<Record<string, string>>(API_CONFIG.ENDPOINTS.SETTINGS),
+    () => serverService.getSettings(),
     {
       onSuccess: (data) => console.log('✅ Settings loaded for API tokens'),
       onError: (error) => console.error('❌ Failed to load settings:', error)
@@ -23,7 +22,7 @@ export const API: React.FC = () => {
   // Create token mutation
   const { mutate: createToken, loading: creating } = useMutation(
     (tokenData: { name: string; token: string }) => 
-      apiService.post(API_CONFIG.ENDPOINTS.API_TOKENS, tokenData),
+      serverService.addApiToken(tokenData.name, tokenData.token),
     {
       onSuccess: () => {
         console.log('✅ API token created successfully');
@@ -35,7 +34,7 @@ export const API: React.FC = () => {
 
   // Delete token mutation
   const { mutate: deleteToken, loading: deleting } = useMutation(
-    (name: string) => apiService.delete(API_CONFIG.ENDPOINTS.API_TOKEN_BY_NAME, { name }),
+    (name: string) => serverService.deleteApiToken(name),
     {
       onSuccess: () => {
         console.log('✅ API token deleted successfully');
@@ -140,51 +139,57 @@ export const API: React.FC = () => {
             <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-green-400 font-mono text-sm">POST</span>
-                <span className="text-gray-400 text-sm">/clients</span>
+                <span className="text-gray-400 text-sm">/api/manage</span>
               </div>
-              <p className="text-gray-300 text-sm">Create a new WireGuard client</p>
-            </div>
-            
-            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-red-400 font-mono text-sm">DELETE</span>
-                <span className="text-gray-400 text-sm">/clients/:name</span>
-              </div>
-              <p className="text-gray-300 text-sm">Remove a WireGuard client</p>
+              <p className="text-gray-300 text-sm">Create/Update/Delete clients</p>
+              <p className="text-gray-500 text-xs">resource: client, action: create/update/delete</p>
             </div>
             
             <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-blue-400 font-mono text-sm">GET</span>
-                <span className="text-gray-400 text-sm">/dashboard</span>
+                <span className="text-gray-400 text-sm">/api/data</span>
               </div>
-              <p className="text-gray-300 text-sm">Get server status and statistics</p>
+              <p className="text-gray-300 text-sm">Get all dashboard data</p>
+              <p className="text-gray-500 text-xs">Returns clients, interfaces, settings</p>
+            </div>
+            
+            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-yellow-400 font-mono text-sm">POST</span>
+                <span className="text-gray-400 text-sm">/api/manage</span>
+              </div>
+              <p className="text-gray-300 text-sm">Manage interfaces</p>
+              <p className="text-gray-500 text-xs">resource: interface, action: create/update</p>
             </div>
           </div>
           
           <div className="space-y-4">
             <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-blue-400 font-mono text-sm">GET</span>
-                <span className="text-gray-400 text-sm">/interfaces</span>
+                <span className="text-purple-400 font-mono text-sm">POST</span>
+                <span className="text-gray-400 text-sm">/api/manage</span>
               </div>
-              <p className="text-gray-300 text-sm">Get WireGuard interfaces</p>
+              <p className="text-gray-300 text-sm">Update settings</p>
+              <p className="text-gray-500 text-xs">resource: setting, action: update</p>
             </div>
             
             <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-blue-400 font-mono text-sm">GET</span>
-                <span className="text-gray-400 text-sm">/clients/:name/config</span>
+                <span className="text-green-400 font-mono text-sm">POST</span>
+                <span className="text-gray-400 text-sm">/api/manage</span>
               </div>
-              <p className="text-gray-300 text-sm">Generate configuration file</p>
+              <p className="text-gray-300 text-sm">Get client config</p>
+              <p className="text-gray-500 text-xs">resource: client, action: get_config</p>
             </div>
             
             <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-yellow-400 font-mono text-sm">PUT</span>
-                <span className="text-gray-400 text-sm">/clients/:name</span>
+                <span className="text-orange-400 font-mono text-sm">POST</span>
+                <span className="text-gray-400 text-sm">/api/manage</span>
               </div>
-              <p className="text-gray-300 text-sm">Update client details</p>
+              <p className="text-gray-300 text-sm">Trigger sync</p>
+              <p className="text-gray-500 text-xs">resource: sync, action: trigger</p>
             </div>
           </div>
         </div>

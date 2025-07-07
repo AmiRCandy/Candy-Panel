@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ApiResponse } from '@/config/api';
+import { FlaskResponse } from '@/config/api';
 
 interface UseApiOptions<T> {
   immediate?: boolean;
@@ -8,7 +8,7 @@ interface UseApiOptions<T> {
 }
 
 export function useApi<T>(
-  apiCall: () => Promise<ApiResponse<T>>,
+  apiCall: () => Promise<FlaskResponse<T>>,
   options: UseApiOptions<T> = {}
 ) {
   const { immediate = true, onSuccess, onError } = options;
@@ -28,7 +28,7 @@ export function useApi<T>(
         setData(response.data);
         onSuccess?.(response.data);
       } else {
-        const errorMessage = response.message || response.error || 'Unknown error';
+        const errorMessage = response.message || 'Unknown error';
         setError(errorMessage);
         onError?.(errorMessage);
       }
@@ -61,7 +61,7 @@ export function useApi<T>(
 }
 
 export function useMutation<T, P = any>(
-  apiCall: (params: P) => Promise<ApiResponse<T>>,
+  apiCall: (params: P) => Promise<FlaskResponse<T>>,
   options: UseApiOptions<T> = {}
 ) {
   const { onSuccess, onError } = options;
@@ -82,7 +82,7 @@ export function useMutation<T, P = any>(
         onSuccess?.(response.data);
         return response.data;
       } else {
-        const errorMessage = response.message || response.error || 'Unknown error';
+        const errorMessage = response.message || 'Unknown error';
         setError(errorMessage);
         onError?.(errorMessage);
         throw new Error(errorMessage);
