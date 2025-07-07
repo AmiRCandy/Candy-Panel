@@ -1,9 +1,10 @@
 # main_flask.py
-from flask import Flask, request, jsonify, abort, g
+from flask import Flask, request, jsonify, abort, g , send_from_directory
 from functools import wraps
 import asyncio
 import json
 from datetime import datetime
+import os
 
 # Import your CandyPanel logic
 from core import CandyPanel, CommandExecutionError
@@ -12,7 +13,7 @@ from core import CandyPanel, CommandExecutionError
 candy_panel = CandyPanel()
 
 # --- Flask Application Setup ---
-app = Flask(__name__)
+app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/')
 app.config['SECRET_KEY'] = 'your_super_secret_key' # Replace with a strong, random key in production
 
 # --- Authentication Decorator ---
@@ -380,7 +381,13 @@ async def get_api_token(name: str):
     if not success:
         return error_response(token_value, 404)
     return success_response("API token retrieved.", data={"token": token_value})
-
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 # This is for development purposes only. For production, use a WSGI server like Gunicorn.
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=3446)
