@@ -46,12 +46,11 @@ export const ClientsTable: React.FC<ClientsTableProps> = ({ clients, loading = f
       <div className="space-y-3">
         {clients.slice(0, 5).map((client, index) => {
           const DeviceIcon = getDeviceIcon(client.name);
-          const isOnline = client.lastHandshake && 
-            new Date(client.lastHandshake).getTime() > Date.now() - 5 * 60 * 1000;
+          const isOnline = client.connected_now;
           
           return (
             <motion.div
-              key={client.id}
+              key={client.name}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.1 }}
@@ -63,14 +62,14 @@ export const ClientsTable: React.FC<ClientsTableProps> = ({ clients, loading = f
                 </div>
                 <div>
                   <p className="text-white font-medium">{client.name}</p>
-                  <p className="text-sm text-gray-400">{client.allowedIPs}</p>
+                  <p className="text-sm text-gray-400">{client.address}</p>
                 </div>
               </div>
               
               <div className="flex items-center space-x-4">
                 <div className="text-right">
                   <p className="text-sm text-gray-400">
-                    {(client.downloadBytes / 1024 / 1024).toFixed(1)} MB
+                    {(client.used_trafic.download / 1024 / 1024).toFixed(1)} MB
                   </p>
                   <p className="text-xs text-gray-500">Downloaded</p>
                 </div>

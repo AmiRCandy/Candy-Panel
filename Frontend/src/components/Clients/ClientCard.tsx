@@ -6,8 +6,9 @@ import { Client } from '@/types';
 interface ClientCardProps {
   client: Client;
   onEdit: (client: Client) => void;
-  onDelete: (id: string) => void;
-  onToggle: (id: string, enabled: boolean) => void;
+  onDelete: (name: string) => void;
+  onToggle: (name: string, enabled: boolean) => void;
+  onDownload: (name: string) => void;
   disabled?: boolean;
 }
 
@@ -20,7 +21,7 @@ const getDeviceIcon = (name: string) => {
   return Monitor;
 };
 
-export const ClientCard: React.FC<ClientCardProps> = ({ client, onEdit, onDelete, onToggle, disabled = false }) => {
+export const ClientCard: React.FC<ClientCardProps> = ({ client, onEdit, onDelete, onToggle, onDownload, disabled = false }) => {
   const [showMenu, setShowMenu] = useState(false);
   const DeviceIcon = getDeviceIcon(client.name);
   
@@ -28,15 +29,6 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, onEdit, onDelete
   const trafficUsedGB = (client.used_trafic.download + client.used_trafic.upload) / (1024 * 1024 * 1024);
   const trafficLimitGB = parseInt(client.traffic) / (1024 * 1024 * 1024);
   const trafficPercent = trafficLimitGB > 0 ? (trafficUsedGB / trafficLimitGB) * 100 : 0;
-
-  const handleDownloadConfig = async () => {
-    try {
-      console.log('📥 Downloading config for client:', client.name);
-      // This would be handled by the parent component
-    } catch (error) {
-      console.error('Failed to download config:', error);
-    }
-  };
 
   return (
     <motion.div
@@ -104,7 +96,7 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, onEdit, onDelete
                 </button>
                 <button 
                   onClick={() => {
-                    handleDownloadConfig();
+                    onDownload(client.name);
                     setShowMenu(false);
                   }}
                   className="w-full px-4 py-2 text-left text-gray-300 hover:bg-gray-700 flex items-center space-x-2"
