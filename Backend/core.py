@@ -294,7 +294,7 @@ PostDown = ufw delete allow {wg_port}/udp
         admin_data = json.dumps({'user': admin_user, 'password': admin_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
-        self.run_command("*/15 * * * * /usr/bin/python3 ./corn.py")
+        self.run_command("*/15 * * * * python3 ./corn.py")
         return True, 'Installed successfully!'
 
     def _admin_login(self, user: str, password: str) -> tuple[bool, str]:
