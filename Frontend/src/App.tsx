@@ -59,8 +59,8 @@ const AppContent: React.FC = () => {
     <div className="min-h-screen bg-black">
       <Router>
         <Routes>
-          <Route path="/login" element={!isAuthenticated ? <Login /> : <Dashboard />} />
-          {/* <Route path="/" element={
+          <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
+          <Route path="/" element={
             <ProtectedRoute>
               <Layout>
                 <PageTransition>
@@ -68,19 +68,10 @@ const AppContent: React.FC = () => {
                 </PageTransition>
               </Layout>
             </ProtectedRoute>
-          } /> */
-          /* <Route path="/" element={
-            <ProtectedRoute>
-              <Layout>
-                <PageTransition>
-                  <Dashboard />
-                </PageTransition>
-              </Layout>
-            </ProtectedRoute>
-          } /> */}
+          } />
           <Route path="/clients" element={
             <ProtectedRoute>
-             <Layout>
+              <Layout>
                 <PageTransition>
                   <Clients />
                 </PageTransition>
