@@ -40,7 +40,7 @@ def authenticate_admin(f):
     return decorated_function
 
 # --- Helper for common responses ---
-def success_response(message: str, data: Any = None, status_code: int = 200):
+def success_response(message: str, data = None, status_code: int = 200):
     return jsonify({"message": message, "success": True, "data": data}), status_code
 
 def error_response(message: str, status_code: int = 400):
