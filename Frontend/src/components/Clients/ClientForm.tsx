@@ -15,7 +15,10 @@ export const ClientForm: React.FC<ClientFormProps> = ({ isOpen, onClose, onSave,
   const [formData, setFormData] = useState({
     name: client?.name || '',
     traffic: client ? (parseInt(client.traffic) / (1024 * 1024 * 1024)).toString() : '0',
-    endTime: client?.expires ? new Date(client.expires).toISOString().slice(0, 16) : '',
+    // Modified line: Add a more robust check for client?.expires
+    endTime: client?.expires && !isNaN(new Date(client.expires).getTime())
+      ? new Date(client.expires).toISOString().slice(0, 16)
+      : '', // Fallback to empty string if expires is null/undefined or invalid date
     notes: client?.note || '',
   });
 
