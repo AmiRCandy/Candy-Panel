@@ -1,10 +1,11 @@
-import React from 'react';
+// Frontend/src/pages/Dashboard.tsx
+import React, { useEffect } from 'react'; // Import useEffect
 import { motion } from 'framer-motion';
 import { Users, Server, Activity, Download, Globe, Loader } from 'lucide-react';
 import { StatsCard } from '@/components/Dashboard/StatsCard';
 import { BandwidthChart } from '@/components/Dashboard/BandwidthChart';
 import { serverService } from '@/services/serverService';
-import { useApi } from '@/hooks/useApi'; // Import useApi
+import { useApi } from '@/hooks/useApi';
 
 export const Dashboard: React.FC = () => {
   // Fetch server stats using the useApi hook
@@ -15,6 +16,16 @@ export const Dashboard: React.FC = () => {
       onError: (err) => console.error('❌ Failed to load dashboard stats:', err),
     }
   );
+
+  // Set up interval for refreshing data every 15 seconds
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      refetch(); // Call refetch function to update data
+    }, 15000); // 15 seconds
+
+    // Clean up the interval when the component unmounts
+    return () => clearInterval(intervalId);
+  }, [refetch]); // Depend on refetch to re-establish interval if it changes
 
   const formatUptime = (seconds: string): string => {
     const sec = parseInt(seconds);
