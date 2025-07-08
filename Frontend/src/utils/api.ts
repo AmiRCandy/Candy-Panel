@@ -106,7 +106,7 @@ class ApiClient {
     name: string;
     expires?: string;
     traffic?: string;
-    status?: boolean;
+    status?: boolean; // Added status update
     note?: string;
   }): Promise<ApiResponse> {
     return this.request('/api/manage', {
@@ -155,6 +155,33 @@ class ApiClient {
     });
   }
 
+  async updateInterface(name: string, data: {
+    address?: string;
+    port?: number;
+    status?: boolean;
+  }): Promise<ApiResponse> {
+    return this.request('/api/manage', {
+      method: 'POST',
+      body: JSON.stringify({
+        resource: 'interface',
+        action: 'update',
+        name,
+        ...data,
+      }),
+    });
+  }
+
+  async deleteInterface(wg_id: number): Promise<ApiResponse> {
+    return this.request('/api/manage', {
+      method: 'POST',
+      body: JSON.stringify({
+        resource: 'interface',
+        action: 'delete',
+        wg_id,
+      }),
+    });
+  }
+
   async updateSetting(key: string, value: string): Promise<ApiResponse> {
     return this.request('/api/manage', {
       method: 'POST',
@@ -163,6 +190,30 @@ class ApiClient {
         action: 'update',
         key,
         value,
+      }),
+    });
+  }
+
+  // New API Token methods
+  async addApiToken(name: string, token: string): Promise<ApiResponse> {
+    return this.request('/api/manage', {
+      method: 'POST',
+      body: JSON.stringify({
+        resource: 'api_token',
+        action: 'create_or_update',
+        name,
+        token,
+      }),
+    });
+  }
+
+  async deleteApiToken(name: string): Promise<ApiResponse> {
+    return this.request('/api/manage', {
+      method: 'POST',
+      body: JSON.stringify({
+        resource: 'api_token',
+        action: 'delete',
+        name,
       }),
     });
   }
