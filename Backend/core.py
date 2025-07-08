@@ -382,7 +382,7 @@ AllowedIPs = {client_ip}/32
             with open(WG_CONF_PATH.replace('X', str(wg_id)), "a") as f:
                 f.write(peer_entry)
             # Apply changes to the running WireGuard interface without full restart
-            self.run_command(f"wg syncconf wg{wg_id} <(wg-quick strip wg{wg_id})")
+            self.run_command(f"bash -c 'wg syncconf wg{wg_id} <(wg-quick strip wg{wg_id})'")
         except Exception as e:
             return False, f"Failed to update WireGuard configuration: {e}"
 
