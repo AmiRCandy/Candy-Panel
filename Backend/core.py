@@ -294,7 +294,7 @@ PostDown = ufw delete allow {wg_port}/udp
         admin_data = json.dumps({'user': admin_user, 'password': admin_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
-        self.run_command("*/15 * * * * python3 ./corn.py")
+        # Add cron job to run the script every 15 minutes (adjust as needed) self.run_command("*/15 * * * * python3 ./corn.py")
         return True, 'Installed successfully!'
 
     def _admin_login(self, user: str, password: str) -> tuple[bool, str]:
@@ -550,7 +550,13 @@ PersistentKeepalive = 25
             return False, f"Interface {interface_name} configuration file already exists."
 
         private_key, public_key = self._generate_keypair()
-
+        server_private_key_path = SERVER_PRIVATE_KEY_PATH.replace('X', str(new_wg_id))
+        server_public_key_path = SERVER_PUBLIC_KEY_PATH.replace('X', str(new_wg_id))
+        with open(server_private_key_path, "w") as f:
+            f.write(private_key)
+            os.chmod(server_private_key_path, 0o600)
+            with open(server_public_key_path, "w") as f:
+                f.write(public_key)
         config = f"""[Interface]
 PrivateKey = {private_key}
 Address = {address_range}
