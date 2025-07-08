@@ -150,9 +150,87 @@ class CandyPanel:
         """
         print(f"[*] Reloading WireGuard interface wg{wg_id}...")
         # Ensure the interface is down before bringing it up to apply changes
-        self.run_command(f"wg-quick down wg{wg_id} || true", check=False) # '|| true' prevents error if already down
-        self.run_command(f"wg-quick up wg{wg_id}")
+        # Use '|| true' to prevent error if already down, allowing 'up' to proceed
+        self.run_command(f"sudo wg-quick down wg{wg_id} || true", check=False) 
+        self.run_command(f"sudo wg-quick up wg{wg_id}")
         print(f"[*] WireGuard interface wg{wg_id} reloaded.")
+
+    def _add_peer_to_config(self, wg_id: int, client_name: str, client_public_key: str, client_ip: str):
+        """
+        Adds a client peer entry to the WireGuard configuration file.
+        """
+        config_path = WG_CONF_PATH.replace('X', str(wg_id))
+        peer_entry = f"""
+[Peer]
+# {client_name}
+PublicKey = {client_public_key}
+AllowedIPs = {client_ip}/32
+"""
+        try:
+            with open(config_path, "a") as f:
+                f.write(peer_entry)
+            # Apply changes to the running WireGuard interface without full restart
+            self.run_command(f"sudo bash -c 'wg syncconf wg{wg_id} <(wg-quick strip wg{wg_id})'")
+            print(f"[+] Client '{client_name}' added to wg{wg_id} config.")
+        except Exception as e:
+            raise CommandExecutionError(f"Failed to add client '{client_name}' to WireGuard configuration: {e}")
+
+    def _remove_peer_from_config(self, wg_id: int, client_name: str):
+        """
+        Removes a client peer entry from the WireGuard configuration file.
+        """
+        config_path = WG_CONF_PATH.replace('X', str(wg_id))
+        
+        if not os.path.exists(config_path):
+            print(f"[!] WireGuard config file {config_path} not found. Cannot remove peer from config.")
+            return # Cannot remove if file doesn't exist
+
+        self._backup_config(wg_id) # Backup before modifying
+
+        try:
+            with open(config_path, "r") as f:
+                lines = f.readlines()
+
+            new_lines = []
+            in_peer_block = False
+            peer_block_to_delete = False
+            temp_block = []
+
+            for line in lines:
+                if line.strip().startswith("[Peer]"):
+                    if in_peer_block: # End of previous block, if any
+                        if not peer_block_to_delete:
+                            new_lines.extend(temp_block)
+                    temp_block = [line]
+                    in_peer_block = True
+                    peer_block_to_delete = False # Reset for new block
+                elif in_peer_block:
+                    temp_block.append(line)
+                    if f"# {client_name}" in line.strip(): # Check for client name in comment
+                        peer_block_to_delete = True
+                    # An empty line or a new [Peer] indicates the end of the current peer block
+                    if not line.strip() and in_peer_block:
+                        if not peer_block_to_delete:
+                            new_lines.extend(temp_block)
+                        in_peer_block = False
+                        temp_block = []
+                else:
+                    new_lines.append(line)
+
+            # Handle the last block if file ends without an empty line
+            if in_peer_block and not peer_block_to_delete:
+                new_lines.extend(temp_block)
+
+            if peer_block_to_delete:
+                with open(config_path, "w") as f:
+                    f.writelines(new_lines)
+                self.run_command(f"sudo bash -c 'wg syncconf wg{wg_id} <(wg-quick strip wg{wg_id})'")
+                print(f"[+] Client '{client_name}' removed from wg{wg_id} config.")
+            else:
+                print(f"[!] Client '{client_name}' peer block not found in config file. No changes made to config.")
+
+        except Exception as e:
+            raise CommandExecutionError(f"Error removing client '{client_name}' from WireGuard configuration: {e}")
 
 
     def _get_current_traffic(self) -> dict:
@@ -376,19 +454,11 @@ PostDown = ufw delete allow {wg_port}/udp
         client_ip = f"{network_address_prefix}.{next_ip_host_part}"
         client_private, client_public = self._generate_keypair()
 
-        peer_entry = f"""
-[Peer]
-# {name}
-PublicKey = {client_public}
-AllowedIPs = {client_ip}/32
-"""
+        # Add peer to WireGuard config
         try:
-            with open(WG_CONF_PATH.replace('X', str(wg_id)), "a") as f:
-                f.write(peer_entry)
-            # Apply changes to the running WireGuard interface without full restart
-            self.run_command(f"bash -c 'wg syncconf wg{wg_id} <(wg-quick strip wg{wg_id})'")
-        except Exception as e:
-            return False, f"Failed to update WireGuard configuration: {e}"
+            self._add_peer_to_config(wg_id, name, client_public, client_ip)
+        except CommandExecutionError as e:
+            return False, str(e)
 
         server_pubkey = self._get_server_public_key(wg_id)
         server_ip = self.db.get('settings', where={'key': 'server_ip'})['value']
@@ -404,7 +474,7 @@ DNS = {dns}
 MTU = {mtu_value}
 
 [Peer]
-PublicKey = {server_pubkey}
+PublicKey = {interface_wg['public_key']} # Server's public key
 Endpoint = {server_ip}:{interface_wg['port']}
 AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
@@ -435,68 +505,12 @@ PersistentKeepalive = 25
             return False, f"Client '{client_name}' not found."
 
         wg_id = client['wg']
-        config_path = WG_CONF_PATH.replace('X', str(wg_id))
-
-        self._backup_config(wg_id) # Backup before modifying
-
+        
         try:
-            with open(config_path, "r") as f:
-                lines = f.readlines()
-
-            new_lines = []
-            in_peer_block = False
-            peer_block_to_delete = False
-            temp_block = []
-
-            for line in lines:
-                if line.strip().startswith("[Peer]"):
-                    if in_peer_block: # End of previous block, if any
-                        new_lines.extend(temp_block)
-                    temp_block = [line]
-                    in_peer_block = True
-                    peer_block_to_delete = False # Reset for new block
-                elif in_peer_block:
-                    temp_block.append(line)
-                    if f"# {client_name}" in line.strip(): # Check for client name in comment
-                        peer_block_to_delete = True
-                    # An empty line or a new [Peer] indicates the end of the current peer block
-                    if not line.strip() and in_peer_block:
-                        if not peer_block_to_delete:
-                            new_lines.extend(temp_block)
-                        in_peer_block = False
-                        temp_block = []
-                else:
-                    new_lines.append(line)
-
-            # Handle the last block if file ends without an empty line
-            if in_peer_block and not peer_block_to_delete:
-                new_lines.extend(temp_block)
-
-            if not peer_block_to_delete:
-                print(f"[!] Client '{client_name}' peer block not found in config file. Proceeding with DB deletion.")
-                # Even if not found in config, proceed to delete from DB if it exists there
-                # This ensures DB is consistent even if config was manually altered
-        except FileNotFoundError:
-            print(f"[!] WireGuard config file {config_path} not found. Cannot delete peer from config.")
-            # Still proceed to delete from DB
-            new_lines = lines # Keep original lines if file not found to avoid writing empty file
-        except Exception as e:
-            print(f"[!] Error processing config file for client '{client_name}': {e}")
-            new_lines = lines # Keep original lines if error to avoid data loss
-
-        # Write the new configuration back only if the file exists and was successfully processed
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, "w") as f:
-                    f.writelines(new_lines)
-                self.run_command(f"wg syncconf wg{wg_id} <(wg-quick strip wg{wg_id})")
-                print(f"[+] WireGuard config for wg{wg_id} updated.")
-            except Exception as e:
-                print(f"[!] Failed to update WireGuard config file for wg{wg_id}: {e}")
-                # Decide if you want to abort here or proceed with DB deletion
-        else:
-            print(f"[!] Skipping config file update as {config_path} does not exist.")
-
+            self._remove_peer_from_config(wg_id, client_name)
+        except CommandExecutionError as e:
+            print(f"[!] Error during peer removal from config: {e}. Proceeding with DB deletion.")
+            # Decide if you want to abort here or proceed with DB deletion
 
         # Delete client from database
         self.db.delete('clients', {'name': client_name})
@@ -506,21 +520,41 @@ PersistentKeepalive = 25
 
     def _edit_client(self, name: str, expire: str = None, traffic: str = None, status: bool = None, note: str = None) -> tuple[bool, str]:
         """
-        Edits an existing client's details in the database.
+        Edits an existing client's details in the database and updates WireGuard config if status changes.
         Allows partial updates by checking for None values.
         """
-        if not self.db.has('clients', {'name': name}):
+        current_client = self.db.get('clients', {'name': name})
+        if not current_client:
             return False, f"Client '{name}' not found."
 
         update_data = {}
+        config_needs_update = False
+
         if expire is not None:
             update_data['expires'] = expire
         if traffic is not None:
             update_data['traffic'] = traffic
-        if status is not None:
-            update_data['status'] = status
         if note is not None:
             update_data['note'] = note
+
+        # Handle status change
+        if status is not None and status != current_client['status']:
+            update_data['status'] = status
+            config_needs_update = True
+            wg_id = current_client['wg']
+
+            if status: # Changing to Active
+                # Re-add peer to config
+                try:
+                    self._add_peer_to_config(wg_id, name, current_client['public_key'], current_client['address'])
+                except CommandExecutionError as e:
+                    return False, str(e)
+            else: # Changing to Inactive
+                # Remove peer from config
+                try:
+                    self._remove_peer_from_config(wg_id, name)
+                except CommandExecutionError as e:
+                    return False, str(e)
 
         if update_data:
             self.db.update('clients', update_data, {'name': name})
@@ -593,48 +627,118 @@ PostDown = ufw delete allow {port}/udp
         """
         Edits an existing WireGuard interface configuration and updates the database.
         'name' should be in 'wgX' format (e.g., 'wg0').
+        Handles starting/stopping the interface based on status change.
         """
         wg_id = int(name.replace('wg', ''))
-        if not self.db.has('interfaces', {'wg': wg_id}):
+        current_interface = self.db.get('interfaces', {'wg': wg_id})
+        if not current_interface:
             return False, f"Interface {name} does not exist in database."
 
         config_path = self._get_interface_path(name)
         if not self._interface_exists(name):
             return False, f"Interface {name} configuration file does not exist."
 
+        update_data = {}
+        reload_needed = False
+        service_action_needed = False
+
         try:
+            # Read current config to modify
             with open(config_path, "r") as f:
                 lines = f.readlines()
 
             new_lines = []
-            update_data = {}
-
             for line in lines:
                 if address is not None and line.strip().startswith("Address ="):
-                    new_lines.append(f"Address = {address}\n")
-                    update_data['address_range'] = address
+                    if line.strip() != f"Address = {address}":
+                        new_lines.append(f"Address = {address}\n")
+                        update_data['address_range'] = address
+                        reload_needed = True
+                    else:
+                        new_lines.append(line)
                 elif port is not None and line.strip().startswith("ListenPort ="):
-                    new_lines.append(f"ListenPort = {port}\n")
-                    update_data['port'] = port
+                    if line.strip() != f"ListenPort = {port}":
+                        new_lines.append(f"ListenPort = {port}\n")
+                        update_data['port'] = port
+                        reload_needed = True
+                    else:
+                        new_lines.append(line)
                 else:
                     new_lines.append(line)
 
-            # Update status in DB if provided
-            if status is not None:
-                update_data['status'] = status
+            # Write updated config back
+            if reload_needed:
+                with open(config_path, "w") as f:
+                    f.writelines(new_lines)
 
+            # Handle status change (start/stop service)
+            if status is not None and status != current_interface['status']:
+                update_data['status'] = status
+                service_action_needed = True
+                if status: # Changing to Active
+                    self.run_command(f"sudo systemctl start wg-quick@{name}")
+                    print(f"[+] Interface {name} started.")
+                else: # Changing to Inactive
+                    self.run_command(f"sudo systemctl stop wg-quick@{name}")
+                    print(f"[+] Interface {name} stopped.")
+            
             # Perform DB update only if there's data to update
             if update_data:
                 self.db.update('interfaces', update_data, {'wg': wg_id})
 
-            with open(config_path, "w") as f:
-                f.writelines(new_lines)
+            # Reload only if config file was changed and service wasn't explicitly started/stopped
+            if reload_needed and not service_action_needed:
+                self._reload_wireguard(wg_id)
 
-            print(f"[+] Interface {name} updated.")
-            self._reload_wireguard(wg_id)
             return True, f"Interface {name} edited successfully."
         except Exception as e:
             return False, f"Error editing interface {name}: {e}"
+
+    def _delete_interface(self, wg_id: int) -> tuple[bool, str]:
+        """
+        Deletes a WireGuard interface, stops its service, removes config files,
+        and deletes associated clients and the interface from the database.
+        """
+        interface_name = f"wg{wg_id}"
+        interface = self.db.get('interfaces', {'wg': wg_id})
+        if not interface:
+            return False, f"Interface {interface_name} not found."
+
+        try:
+            # 1. Stop and disable the WireGuard service
+            self.run_command(f"sudo systemctl stop wg-quick@{interface_name}", check=False)
+            self.run_command(f"sudo systemctl disable wg-quick@{interface_name}", check=False)
+            print(f"[+] WireGuard service wg-quick@{interface_name} stopped and disabled.")
+
+            # 2. Remove WireGuard configuration files and keys
+            config_path = WG_CONF_PATH.replace('X', str(wg_id))
+            private_key_path = SERVER_PRIVATE_KEY_PATH.replace('X', str(wg_id))
+            public_key_path = SERVER_PUBLIC_KEY_PATH.replace('X', str(wg_id))
+
+            if os.path.exists(config_path):
+                os.remove(config_path)
+                print(f"[+] Removed config file: {config_path}")
+            if os.path.exists(private_key_path):
+                os.remove(private_key_path)
+                print(f"[+] Removed private key: {private_key_path}")
+            if os.path.exists(public_key_path):
+                os.remove(public_key_path)
+                print(f"[+] Removed public key: {public_key_path}")
+
+            # 3. Delete all clients associated with this interface from the database
+            clients_to_delete = self.db.select('clients', where={'wg': wg_id})
+            for client in clients_to_delete:
+                self.db.delete('clients', {'name': client['name']})
+                print(f"[+] Deleted associated client: {client['name']}")
+
+            # 4. Delete the interface record from the database
+            self.db.delete('interfaces', {'wg': wg_id})
+            print(f"[+] Interface {interface_name} deleted from database.")
+
+            return True, f"Interface {interface_name} and all associated clients deleted successfully."
+        except Exception as e:
+            return False, f"Error deleting interface {interface_name}: {e}"
+
 
     def _get_client_config(self, name: str) -> tuple[bool, str]:
         """
@@ -932,4 +1036,3 @@ PersistentKeepalive = 25
 # Custom exception for command execution errors
 class CommandExecutionError(Exception):
     pass
-
