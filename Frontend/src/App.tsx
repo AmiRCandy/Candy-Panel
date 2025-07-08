@@ -11,7 +11,6 @@ import {
   Eye, 
   EyeOff,
   RefreshCw,
-  Wifi,
   AlertCircle,
   CheckCircle,
   Clock,
@@ -20,13 +19,11 @@ import {
   Network,
   LogOut,
   Shield,
-  Moon,
-  Sun,
   Bot, // New icon for Telegram Bot
   Key // New icon for API Tokens
 } from 'lucide-react';
 import { apiClient } from './utils/api';
-import { Client, Interface, DashboardStats, AllData, ApiTokens } from './types';
+import { Client, Interface, AllData, ApiTokens } from './types';
 
 interface TabButtonProps {
   icon: React.ReactNode;

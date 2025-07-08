@@ -372,7 +372,6 @@ PostDown = ufw delete allow {wg_port}/udp
         admin_data = json.dumps({'user': admin_user, 'password': admin_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
-        # Add cron job to run the script every 15 minutes (adjust as needed) self.run_command("*/15 * * * * python3 ./corn.py")
         current_dir = os.path.abspath(os.path.dirname(__file__))
         cron_script_path = os.path.join(current_dir, 'cron.py')
         cron_line = f"*/15 * * * * python3 {cron_script_path} >> /var/log/candy-sync.log 2>&1"
@@ -408,7 +407,7 @@ PostDown = ufw delete allow {wg_port}/udp
         download_speed_kbps = bytes_recv / 1024 # KB/s
 
         return {
-            'cpu': f"{psutil.cpu_percent()}%", # psutil.cpu_percent() without interval calculates since last call
+            'cpu': f"{psutil.cpu_percent()}%",
             'mem': {
                 'total': f"{mem.total / (1024**3):.2f} GB",
                 'available': f"{mem.available / (1024**3):.2f} GB",
@@ -465,7 +464,7 @@ PostDown = ufw delete allow {wg_port}/udp
         dns = self.db.get('settings', where={'key': 'dns'})['value']
         # MTU might not be available if not set in settings, provide a default
         mtu = self.db.get('settings', where={'key': 'mtu'})
-        mtu_value = mtu['value'] if mtu else '1420' # Default MTU if not found
+        mtu_value = mtu['value'] if mtu else '1350' # Default MTU if not found
 
         client_config = f"""[Interface]
 PrivateKey = {client_private}
@@ -844,12 +843,125 @@ PersistentKeepalive = 25
         except Exception as e:
             return False, f"Failed to retrieve API token: {e}"
 
+    def _start_telegram_bot(self):
+        """
+        Starts the telegram_bot.py script as a detached subprocess.
+        Stores its PID in the settings.
+        """
+        print("[*] Attempting to start Telegram bot...")
+        try:
+            bot_token_setting = self.db.get('settings', where={'key': 'telegram_bot_token'})
+            api_id_setting = self.db.get('settings', where={'key': 'telegram_api_id'})
+            api_hash_setting = self.db.get('settings', where={'key': 'telegram_api_hash'})
+
+            if not bot_token_setting or bot_token_setting['value'] == 'YOUR_TELEGRAM_BOT_TOKEN':
+                print("[!] Telegram bot token not configured. Cannot start bot.")
+                return False
+            if not api_id_setting or not api_id_setting['value'].isdigit():
+                print("[!] Telegram API ID not configured or invalid. Cannot start bot.")
+                return False
+            if not api_hash_setting or not api_hash_setting['value']:
+                print("[!] Telegram API Hash not configured. Cannot start bot.")
+                return False
+
+            bot_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'telegram_bot.py')
+            
+            # Set environment variables for the subprocess
+            env = os.environ.copy()
+            env["TELEGRAM_API_ID"] = api_id_setting['value']
+            env["TELEGRAM_API_HASH"] = api_hash_setting['value']
+            # BOT_TOKEN is fetched by telegram_bot.py itself from DB, so no need to pass here.
+
+            # Use subprocess.Popen to run in background, redirecting stdout/stderr to avoid blocking
+            # and setting preexec_fn for detaching on Unix-like systems.
+            process = subprocess.Popen(
+                ['python3', bot_script_path],
+                stdout=subprocess.DEVNULL, # Redirect stdout to /dev/null
+                stderr=subprocess.DEVNULL, # Redirect stderr to /dev/null
+                preexec_fn=os.setsid, # Detach from parent process
+                env=env # Pass environment variables
+            )
+            self.db.update('settings', {'value': str(process.pid)}, {'key': 'telegram_bot_pid'})
+            print(f"[+] Telegram bot started with PID: {process.pid}")
+            return True
+        except FileNotFoundError:
+            print(f"[!] Error: telegram_bot.py not found at {bot_script_path}. Cannot start bot.")
+            return False
+        except Exception as e:
+            print(f"[!] Failed to start Telegram bot: {e}")
+            return False
+
+    def _stop_telegram_bot(self):
+        """
+        Stops the Telegram bot process.
+        """
+        print("[*] Attempting to stop Telegram bot...")
+        pid_setting = self.db.get('settings', where={'key': 'telegram_bot_pid'})
+        if not pid_setting or not pid_setting['value'].isdigit():
+            print("[!] Telegram bot PID not found or invalid in settings. Assuming bot is not running.")
+            self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+            return False
+
+        pid = int(pid_setting['value'])
+        if pid == 0:
+            print("[!] Telegram bot PID is 0. Assuming bot is not running.")
+            return False
+
+        try:
+            process = psutil.Process(pid)
+            cmdline = " ".join(process.cmdline()).lower()
+            if "telegram_bot.py" in cmdline:
+                process.terminate() # or process.kill() for a more forceful termination
+                process.wait(timeout=5) # Wait for process to terminate
+                print(f"[+] Telegram bot (PID: {pid}) stopped.")
+            else:
+                print(f"[!] PID {pid} is not the Telegram bot. Not terminating.")
+            self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'}) # Clear PID regardless
+            return True
+        except psutil.NoSuchProcess:
+            print(f"[!] Telegram bot process with PID {pid} not found. Assuming it's already stopped.")
+            self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+            return False
+        except psutil.TimeoutExpired:
+            print(f"[!] Telegram bot process with PID {pid} did not terminate gracefully. Killing...")
+            process.kill()
+            process.wait()
+            self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+            return True
+        except Exception as e:
+            print(f"[!] Error stopping Telegram bot (PID: {pid}): {e}")
+            return False
+
+
     def _sync(self):
         """
         Synchronizes client data, traffic, and performs scheduled tasks.
         This method should be run periodically (e.g., via cron).
         """
         print("[*] Starting synchronization process...")
+
+        # --- Telegram Bot Management ---
+        telegram_bot_status_setting = self.db.get('settings', where={'key': 'telegram_bot_status'})
+        telegram_bot_status = int(telegram_bot_status_setting['value']) if telegram_bot_status_setting else 0
+
+        telegram_bot_pid_setting = self.db.get('settings', where={'key': 'telegram_bot_pid'})
+        telegram_bot_pid = int(telegram_bot_pid_setting['value']) if telegram_bot_pid_setting and telegram_bot_pid_setting['value'].isdigit() else 0
+
+        is_bot_running = self._is_telegram_bot_running(telegram_bot_pid)
+
+        if telegram_bot_status == 1: # Bot should be running
+            if not is_bot_running:
+                print("[*] Telegram bot is configured to be ON but is not running. Starting it...")
+                self._start_telegram_bot()
+            else:
+                print(f"[*] Telegram bot (PID: {telegram_bot_pid}) is running as expected.")
+        else: # telegram_bot_status == 0, Bot should be stopped
+            if is_bot_running:
+                print("[*] Telegram bot is configured to be OFF but is running. Stopping it...")
+                self._stop_telegram_bot()
+            else:
+                print("[*] Telegram bot is configured to be OFF and is not running. (Desired state)")
+
 
         # --- Handle Reset Timer for Interface Reloads ---
         reset_time_setting = self.db.get('settings', where={'key': 'reset_time'})

@@ -1,10 +1,9 @@
-# main_flask.py
 from flask import Flask, request, jsonify, abort, g, send_from_directory
 from functools import wraps
 from flask_cors import CORS
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 # Import your CandyPanel logic
@@ -15,10 +14,10 @@ candy_panel = CandyPanel()
 
 # --- Flask Application Setup ---
 app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/')
-app.config['SECRET_KEY'] = 'your_super_secret_key'  # Replace with a strong, random key in production
+app.config['SECRET_KEY'] = 'your_super_secret_key'
 CORS(app)
 
-# --- Authentication Decorator ---
+# --- Authentication Decorator for CandyPanel Admin API ---
 def authenticate_admin(f):
     @wraps(f)
     async def decorated_function(*args, **kwargs):
@@ -50,7 +49,7 @@ def success_response(message: str, data=None, status_code: int = 200):
 def error_response(message: str, status_code: int = 400):
     return jsonify({"message": message, "success": False}), status_code
 
-# --- API Endpoints ---
+# --- CandyPanel API Endpoints ---
 
 @app.get("/check")
 async def check_installation():
@@ -300,6 +299,554 @@ async def manage_resources():
     except Exception as e:
         return error_response(f"An unexpected error occurred: {e}", 500)
 
+# --- Telegram Bot API Endpoints (Integrated) ---
+
+@app.post("/bot_api/user/register")
+async def bot_register_user():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    if not telegram_id:
+        return error_response("Missing telegram_id", 400)
+
+    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
+    if user:
+        return success_response("User already registered.", data={"registered": True})
+
+    await asyncio.to_thread(candy_panel.db.insert, 'users', {
+        'telegram_id': telegram_id,
+        'created_at': datetime.now().isoformat()
+    })
+    return success_response("User registered successfully.", data={"registered": True})
+
+@app.post("/bot_api/user/buy_traffic_request")
+async def bot_buy_traffic_request():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    order_id = data.get('order_id')
+    card_number_sent = data.get('card_number_sent')
+    purchase_type = data.get('purchase_type')
+    quantity = data.get('quantity')
+    time_quantity = data.get('time_quantity', 0) 
+    traffic_quantity = data.get('traffic_quantity', 0)
+
+    if not all([telegram_id, purchase_type]):
+        return error_response("Missing telegram_id or purchase_type", 400)
+
+    # Check if user exists
+    if not await asyncio.to_thread(candy_panel.db.has, 'users', {'telegram_id': telegram_id}):
+        return error_response("User not registered with the bot.", 404)
+
+    prices_json = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'prices'})
+    prices = json.loads(prices_json['value']) if prices_json else {}
+
+    calculated_amount = 0
+    if purchase_type == 'gb':
+        if quantity is None: return error_response("Missing quantity for GB purchase", 400)
+        price_per_gb = prices.get('1GB')
+        if not price_per_gb:
+            return error_response("Price per GB not configured.", 500)
+        calculated_amount = price_per_gb * quantity
+    elif purchase_type == 'month':
+        if quantity is None: return error_response("Missing quantity for Month purchase", 400)
+        price_per_month = prices.get('1Month')
+        if not price_per_month:
+            return error_response("Price per Month not configured.", 500)
+        calculated_amount = price_per_month * quantity
+    elif purchase_type == 'custom':
+        if time_quantity is None or traffic_quantity is None:
+            return error_response("Missing time_quantity or traffic_quantity for custom purchase", 400)
+        price_per_gb = prices.get('1GB')
+        price_per_month = prices.get('1Month')
+        if not price_per_gb or not price_per_month:
+            return error_response("Prices for custom plan (1GB or 1Month) not configured.", 500)
+        calculated_amount = (price_per_gb * traffic_quantity) + (price_per_month * time_quantity)
+    else:
+        return error_response("Invalid purchase_type. Must be 'gb', 'month', or 'custom'.", 400)
+
+    # If this is the final request (from /bought command), then order_id and card_number_sent will be real
+    if order_id and card_number_sent:
+        # Check if order_id already exists (to prevent duplicate requests)
+        if await asyncio.to_thread(candy_panel.db.has, 'transactions', {'order_id': order_id}):
+            return error_response("Order ID already exists. Please use a unique order ID.", 400)
+
+        await asyncio.to_thread(candy_panel.db.insert, 'transactions', {
+            'order_id': order_id,
+            'telegram_id': telegram_id,
+            'amount': calculated_amount,
+            'card_number_sent': card_number_sent,
+            'status': 'pending',
+            'requested_at': datetime.now().isoformat(),
+            'purchase_type': purchase_type,
+            'quantity': quantity if quantity is not None else 0, # Store quantity for 'gb'/'month'
+            'time_quantity': time_quantity, # Store for 'custom'
+            'traffic_quantity': traffic_quantity # Store for 'custom'
+        })
+        message_to_user = "Purchase request submitted. Admin will review."
+    else: # This is the initial request to get prices and card number, or quantity selection
+        message_to_user = "Please choose your purchase type and quantity."
+
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+
+    admin_card_number_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'admin_card_number'})
+    admin_card_number = admin_card_number_setting['value'] if admin_card_number_setting else 'YOUR_ADMIN_CARD_NUMBER'
+
+
+    return success_response(message_to_user, data={
+        "admin_card_number": admin_card_number,
+        "prices": prices,
+        "admin_telegram_id": admin_telegram_id,
+        "calculated_amount": calculated_amount # Return calculated amount for user confirmation
+    })
+
+@app.post("/bot_api/user/get_license")
+async def bot_get_user_license():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    if not telegram_id:
+        return error_response("Missing telegram_id", 400)
+
+    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
+    if not user:
+        return error_response("User not registered with the bot.", 404)
+    if not user.get('candy_client_name'):
+        return error_response("You don't have an active license yet. Please purchase one.", 404)
+
+    success, config_content = await asyncio.to_thread(candy_panel._get_client_config, user['candy_client_name'])
+    if not success:
+        return error_response(f"Failed to retrieve license: {config_content}", 500)
+
+    return success_response("Your WireGuard configuration:", data={"config": config_content})
+
+@app.post("/bot_api/user/account_status")
+async def bot_get_account_status():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    if not telegram_id:
+        return error_response("Missing telegram_id", 400)
+
+    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
+    if not user:
+        return error_response("User not registered with the bot.", 404)
+
+    status_info = {
+        "status": user['status'],
+        "traffic_bought_gb": user['traffic_bought_gb'],
+        "time_bought_days": user['time_bought_days'],
+        "candy_client_name": user['candy_client_name']
+    }
+
+    if user.get('candy_client_name'):
+        # Directly call CandyPanel's internal method to get all clients
+        all_clients_data = await asyncio.to_thread(candy_panel._get_all_clients)
+        
+        if all_clients_data:
+            client_info = next((c for c in all_clients_data if c['name'] == user['candy_client_name']), None)
+            if client_info:
+                used_traffic = json.loads(client_info.get('used_trafic', '{"download":0,"upload":0}'))
+                status_info['used_traffic_bytes'] = used_traffic['download'] + used_traffic['upload']
+                status_info['expires'] = client_info.get('expires') # Get expiry from CandyPanel
+                status_info['traffic_limit_bytes'] = int(client_info.get('traffic', 0))
+            else:
+                status_info['note'] = "Client not found in CandyPanel. Data might be outdated."
+        else:
+            status_info['note'] = "Could not fetch live traffic data from CandyPanel."
+
+    return success_response("Your account status:", data=status_info)
+
+@app.post("/bot_api/user/call_support")
+async def bot_call_support():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    message_text = data.get('message')
+
+    if not all([telegram_id, message_text]):
+        return error_response("Missing telegram_id or message", 400)
+
+    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
+    username = f"User {telegram_id}"
+    if user and user.get('candy_client_name'):
+        username = user['candy_client_name']
+
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+
+    if admin_telegram_id == '0':
+        return error_response("Admin Telegram ID not set in bot settings.", 500)
+
+    return success_response("Your message has been sent to support.", data={
+        "admin_telegram_id": admin_telegram_id,
+        "support_message": f"Support request from {username} (ID: {telegram_id}):\n\n{message_text}"
+    })
+
+# --- Admin Endpoints ---
+
+@app.post("/bot_api/admin/check_admin")
+async def bot_check_admin():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    if not telegram_id:
+        return error_response("Missing telegram_id", 400)
+    
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+    is_admin = (str(telegram_id) == admin_telegram_id)
+    return success_response("Admin status checked.", data={"is_admin": is_admin, "admin_telegram_id": admin_telegram_id})
+
+
+@app.post("/bot_api/admin/get_all_users")
+async def bot_admin_get_all_users():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+
+    if not telegram_id or str(telegram_id) != admin_telegram_id:
+        return error_response("Unauthorized", 403)
+
+    users = await asyncio.to_thread(candy_panel.db.select, 'users')
+    return success_response("All bot users retrieved.", data={"users": users})
+
+@app.post("/bot_api/admin/get_transactions")
+async def bot_admin_get_transactions():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    status_filter = data.get('status_filter', 'pending') # 'pending', 'approved', 'rejected', 'all'
+
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+
+    if not telegram_id or str(telegram_id) != admin_telegram_id:
+        return error_response("Unauthorized", 403)
+
+    where_clause = {}
+    if status_filter != 'all':
+        where_clause['status'] = status_filter
+
+    transactions = await asyncio.to_thread(candy_panel.db.select, 'transactions', where=where_clause)
+    return success_response("Transactions retrieved.", data={"transactions": transactions})
+
+@app.post("/bot_api/admin/approve_transaction")
+async def bot_admin_approve_transaction():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    order_id = data.get('order_id')
+    admin_note = data.get('admin_note', '')
+
+    if not all([telegram_id, order_id]):
+        return error_response("Missing required fields for approval.", 400)
+    
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+
+    if str(telegram_id) != admin_telegram_id:
+        return error_response("Unauthorized", 403)
+
+    transaction = await asyncio.to_thread(candy_panel.db.get, 'transactions', where={'order_id': order_id})
+    if not transaction:
+        return error_response("Transaction not found.", 404)
+    if transaction['status'] != 'pending':
+        return error_response("Transaction is not pending.", 400)
+
+    purchase_type = transaction['purchase_type']
+    
+    # Determine quantities based on purchase_type
+    if purchase_type == 'gb' or purchase_type == 'month':
+        quantity = transaction['quantity']
+        time_quantity = 0
+        traffic_quantity = 0
+        if purchase_type == 'gb':
+            traffic_quantity = quantity
+            expire_days_for_candy = 365 # Default expiry for GB plans
+        else: # 'month'
+            time_quantity = quantity
+            expire_days_for_candy = quantity * 30
+            traffic_quantity = 1000 # Default high traffic for time-based plans (1TB)
+    elif purchase_type == 'custom':
+        time_quantity = transaction['time_quantity']
+        traffic_quantity = transaction['traffic_quantity']
+        expire_days_for_candy = time_quantity * 30 # Convert months to days
+    else:
+        return error_response("Invalid purchase_type in transaction record.", 500)
+    
+    # Generate a unique client name (e.g., "user_<telegram_id>_<timestamp>")
+    client_name = f"user_{transaction['telegram_id']}_{int(datetime.now().timestamp())}"
+
+    expires_dt = datetime.now() + timedelta(days=int(expire_days_for_candy))
+    expires_iso = expires_dt.isoformat()
+    traffic_bytes = int(float(traffic_quantity) * (1024**3)) # Convert GB to bytes
+
+    # 1. Create client in CandyPanel (direct internal call)
+    success, message = await asyncio.to_thread(
+        candy_panel._new_client,
+        client_name,
+        expires_iso,
+        str(traffic_bytes), # CandyPanel expects string
+        0, # Assuming default wg0 for now, can be made configurable
+        f"Bot User: {transaction['telegram_id']} - Order: {order_id} - Type: {purchase_type} - T: {time_quantity} - G: {traffic_quantity}"
+    )
+
+    if not success:
+        return error_response(f"Failed to create client in CandyPanel: {message}", 500)
+
+    # The _new_client method returns the client config as 'message' on success
+    client_config = message 
+
+    # 2. Update bot's user table
+    user_in_bot_db = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': transaction['telegram_id']})
+    if user_in_bot_db:
+        await asyncio.to_thread(candy_panel.db.update, 'users', {
+            'candy_client_name': client_name,
+            'traffic_bought_gb': user_in_bot_db.get('traffic_bought_gb', 0) + traffic_quantity, # Accumulate traffic
+            'time_bought_days': user_in_bot_db.get('time_bought_days', 0) + expire_days_for_candy, # Accumulate time
+            'status': 'active'
+        }, {'telegram_id': transaction['telegram_id']})
+    else:
+        print(f"Warning: User {transaction['telegram_id']} not found in bot_db during transaction approval.")
+
+
+    # 3. Update transaction status
+    await asyncio.to_thread(candy_panel.db.update, 'transactions', {
+        'status': 'approved',
+        'approved_at': datetime.now().isoformat(),
+        'admin_note': admin_note
+    }, {'order_id': order_id})
+
+    return success_response(f"Transaction {order_id} approved. Client '{client_name}' created in CandyPanel.", data={
+        "client_config": client_config, # Send config back to bot for user
+        "telegram_id": transaction['telegram_id'], # For bot to send message to user
+        "client_name": client_name # Pass client name for user message
+    })
+
+@app.post("/bot_api/admin/reject_transaction")
+async def bot_admin_reject_transaction():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    order_id = data.get('order_id')
+    admin_note = data.get('admin_note', '')
+
+    if not all([telegram_id, order_id]):
+        return error_response("Missing telegram_id or order_id.", 400)
+    
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+
+    if str(telegram_id) != admin_telegram_id:
+        return error_response("Unauthorized", 403)
+
+    transaction = await asyncio.to_thread(candy_panel.db.get, 'transactions', where={'order_id': order_id})
+    if not transaction:
+        return error_response("Transaction not found.", 404)
+    if transaction['status'] != 'pending':
+        return error_response("Transaction is not pending.", 400)
+
+    await asyncio.to_thread(candy_panel.db.update, 'transactions', {
+        'status': 'rejected',
+        'approved_at': datetime.now().isoformat(),
+        'admin_note': admin_note
+    }, {'order_id': order_id})
+
+    return success_response(f"Transaction {order_id} rejected.", data={
+        "telegram_id": transaction['telegram_id'] # For bot to send message to user
+    })
+
+@app.post("/bot_api/admin/manage_user")
+async def bot_admin_manage_user():
+    data = request.json
+    admin_telegram_id = data.get('admin_telegram_id')
+    target_telegram_id = data.get('target_telegram_id')
+    action = data.get('action') # 'ban', 'unban', 'update_traffic', 'update_time'
+    value = data.get('value') # For update_traffic/time
+
+    if not all([admin_telegram_id, target_telegram_id, action]):
+        return error_response("Missing required fields.", 400)
+    
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+
+    if str(admin_telegram_id) != admin_telegram_id:
+        return error_response("Unauthorized", 403)
+
+    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': target_telegram_id})
+    if not user:
+        return error_response("Target user not found.", 404)
+
+    update_data = {}
+    message = ""
+    success_status = True
+
+    if action == 'ban':
+        update_data['status'] = 'banned'
+        message = f"User {target_telegram_id} has been banned."
+        # Also disable in CandyPanel if linked
+        if user.get('candy_client_name'):
+            success, msg = await asyncio.to_thread(
+                candy_panel._edit_client, user['candy_client_name'], status=False
+            )
+            if not success:
+                message += f" (Failed to disable client in CandyPanel: {msg})"
+                success_status = False
+    elif action == 'unban':
+        update_data['status'] = 'active'
+        message = f"User {target_telegram_id} has been unbanned."
+        # Also enable in CandyPanel if linked
+        if user.get('candy_client_name'):
+            success, msg = await asyncio.to_thread(
+                candy_panel._edit_client, user['candy_client_name'], status=True
+            )
+            if not success:
+                message += f" (Failed to enable client in CandyPanel: {msg})"
+                success_status = False
+    elif action == 'update_traffic' and value is not None:
+        try:
+            new_traffic_gb = float(value)
+            update_data['traffic_bought_gb'] = new_traffic_gb
+            message = f"User {target_telegram_id} traffic updated to {new_traffic_gb} GB."
+            # Update in CandyPanel
+            if user.get('candy_client_name'):
+                traffic_bytes = int(new_traffic_gb * (1024**3))
+                success, msg = await asyncio.to_thread(
+                    candy_panel._edit_client, user['candy_client_name'], traffic=str(traffic_bytes)
+                )
+                if not success:
+                    message += f" (Failed to update traffic in CandyPanel: {msg})"
+                    success_status = False
+        except ValueError:
+            return error_response("Invalid value for traffic. Must be a number.", 400)
+    elif action == 'update_time' and value is not None:
+        try:
+            new_time_days = int(value)
+            update_data['time_bought_days'] = new_time_days
+            message = f"User {target_telegram_id} time updated to {new_time_days} days."
+            # Update in CandyPanel (this is more complex, as CandyPanel uses expiry date)
+            # For simplicity, we'll just update the bot's record for now.
+            # A full implementation would recalculate expiry based on new_time_days from current date
+            # or extend the existing expiry. For now, this is a placeholder.
+            message += " (Note: Time update in CandyPanel requires manual expiry date calculation or a dedicated API endpoint in CandyPanel.)"
+        except ValueError:
+            return error_response("Invalid value for time. Must be an integer.", 400)
+    else:
+        return error_response("Invalid action or missing value.", 400)
+
+    if update_data:
+        await asyncio.to_thread(candy_panel.db.update, 'users', update_data, {'telegram_id': target_telegram_id})
+    
+    if success_status:
+        return success_response(message)
+    else:
+        return error_response(message, 500)
+
+
+@app.post("/bot_api/admin/send_message_to_all")
+async def bot_admin_send_message_to_all():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    message_text = data.get('message')
+
+    if not all([telegram_id, message_text]):
+        return error_response("Missing telegram_id or message.", 400)
+    
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+
+    if str(telegram_id) != admin_telegram_id:
+        return error_response("Unauthorized", 403)
+
+    all_users = await asyncio.to_thread(candy_panel.db.select, 'users')
+    user_ids = [user['telegram_id'] for user in all_users]
+
+    # This API endpoint just prepares the list of users.
+    # The Telegram bot itself will handle the actual sending to avoid blocking the API.
+    return success_response("Broadcast message prepared.", data={"target_user_ids": user_ids, "message": message_text})
+
+@app.post("/bot_api/admin/server_control")
+async def bot_admin_server_control():
+    data = request.json
+    admin_telegram_id = data.get('admin_telegram_id')
+    resource = data.get('resource')
+    action = data.get('action')
+    payload_data = data.get('data', {}) # Additional data for the CandyPanel API call
+
+    if not all([admin_telegram_id, resource, action]):
+        return error_response("Missing admin_telegram_id, resource, or action.", 400)
+    
+    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
+
+    if str(admin_telegram_id) != admin_telegram_id:
+        return error_response("Unauthorized", 403)
+
+    # Direct internal calls to CandyPanel methods
+    success = False
+    message = "Invalid operation."
+    candy_data = {}
+
+    if resource == 'client':
+        if action == 'create':
+            name = payload_data.get('name')
+            expires = payload_data.get('expires')
+            traffic = payload_data.get('traffic')
+            wg_id = payload_data.get('wg_id', 0)
+            note = payload_data.get('note', '')
+            if all([name, expires, traffic]):
+                success, message = await asyncio.to_thread(candy_panel._new_client, name, expires, traffic, wg_id, note)
+                if success:
+                    candy_data = {"client_config": message} # _new_client returns config on success
+        elif action == 'update':
+            name = payload_data.get('name')
+            expires = payload_data.get('expires')
+            traffic = payload_data.get('traffic')
+            status = payload_data.get('status')
+            note = payload_data.get('note')
+            if name:
+                success, message = await asyncio.to_thread(candy_panel._edit_client, name, expires, traffic, status, note)
+        elif action == 'delete':
+            name = payload_data.get('name')
+            if name:
+                success, message = await asyncio.to_thread(candy_panel._delete_client, name)
+        elif action == 'get_config':
+            name = payload_data.get('name')
+            if name:
+                success, message = await asyncio.to_thread(candy_panel._get_client_config, name)
+                if success:
+                    candy_data = {"config": message}
+    elif resource == 'interface':
+        if action == 'create':
+            address_range = payload_data.get('address_range')
+            port = payload_data.get('port')
+            if all([address_range, port]):
+                success, message = await asyncio.to_thread(candy_panel._new_interface_wg, address_range, port)
+        elif action == 'update':
+            name = payload_data.get('name')
+            address = payload_data.get('address')
+            port = payload_data.get('port')
+            status = payload_data.get('status')
+            if name:
+                success, message = await asyncio.to_thread(candy_panel._edit_interface, name, address, port, status)
+        elif action == 'delete':
+            wg_id = payload_data.get('wg_id')
+            if wg_id is not None:
+                success, message = await asyncio.to_thread(candy_panel._delete_interface, wg_id)
+    elif resource == 'setting':
+        if action == 'update':
+            key = payload_data.get('key')
+            value = payload_data.get('value')
+            if all([key, value is not None]):
+                success, message = await asyncio.to_thread(candy_panel._change_settings, key, value)
+    elif resource == 'sync':
+        if action == 'trigger':
+            await asyncio.to_thread(candy_panel._sync)
+            success = True
+            message = "Synchronization process initiated successfully."
+    else:
+        return error_response(f"Unknown resource type: {resource}", 400)
+
+    if success:
+        return success_response(f"CandyPanel: {message}", data=candy_data)
+    else:
+        return error_response(f"CandyPanel Error: {message}", 500)
+
+
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_frontend(path):
@@ -311,3 +858,4 @@ def serve_frontend(path):
 # This is for development purposes only. For production, use a WSGI server like Gunicorn.
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=3446)
+
