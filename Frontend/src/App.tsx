@@ -1231,7 +1231,7 @@ function App() {
                 rows={4}
                 placeholder='{"per_month":75000,"per_gb":4000}'
               />
-              <p className="text-xs text-gray-500 mt-1">Enter as a valid JSON string, e.g., `{"per_month":75000,"per_gb":4000}`</p>
+              <p className="text-xs text-gray-500 mt-1">Enter as a valid JSON string, e.g., `"per_month":75000,"per_gb":4000`</p>
             </div>
           </div>
         </div>
