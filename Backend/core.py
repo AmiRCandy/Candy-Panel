@@ -295,6 +295,10 @@ PostDown = ufw delete allow {wg_port}/udp
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
         # Add cron job to run the script every 15 minutes (adjust as needed) self.run_command("*/15 * * * * python3 ./corn.py")
+        current_dir = os.path.abspath(os.path.dirname(__file__))
+        cron_script_path = os.path.join(current_dir, 'cron.py')
+        cron_line = f"*/15 * * * * python3 {cron_script_path} >> /var/log/candy-sync.log 2>&1"
+        self.run_command(f'(crontab -l 2>/dev/null; echo "{cron_line}") | crontab -')
         return True, 'Installed successfully!'
 
     def _admin_login(self, user: str, password: str) -> tuple[bool, str]:
