@@ -210,7 +210,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [WireGuard](https://www.wireguard.com/) for the amazing VPN technology
 - [shadcn/ui](https://ui.shadcn.com/) for the beautiful UI components
-- [FastAPI](https://fastapi.tiangolo.com/) for the excellent Python framework
+- [Flask](https://flask.palletsprojects.com/en/stable/) for the excellent Python framework
 - [React](https://reactjs.org/) and [Vite](https://vitejs.dev/) for the frontend tools (Frontend built by [BoltAI](https://bolt.new))
 
 ## 📞 Support
