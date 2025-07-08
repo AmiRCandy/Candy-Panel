@@ -21,10 +21,12 @@ import {
   LogOut,
   Shield,
   Moon,
-  Sun
+  Sun,
+  Bot, // New icon for Telegram Bot
+  Key // New icon for API Tokens
 } from 'lucide-react';
 import { apiClient } from './utils/api';
-import { Client, Interface, DashboardStats, AllData } from './types';
+import { Client, Interface, DashboardStats, AllData, ApiTokens } from './types';
 
 interface TabButtonProps {
   icon: React.ReactNode;
@@ -95,14 +97,24 @@ function App() {
   const [clientTraffic, setClientTraffic] = useState('');
   const [clientWgId, setClientWgId] = useState('0');
   const [clientNote, setClientNote] = useState('');
+  const [clientStatus, setClientStatus] = useState(true); // New state for client status
 
   // Interface form states
   const [showInterfaceForm, setShowInterfaceForm] = useState(false);
   const [interfaceAddressRange, setInterfaceAddressRange] = useState('');
   const [interfacePort, setInterfacePort] = useState('');
+  const [showEditInterfaceForm, setShowEditInterfaceForm] = useState(false); // New state for editing interface
+  const [editingInterface, setEditingInterface] = useState<Interface | null>(null);
+  const [editInterfaceAddressRange, setEditInterfaceAddressRange] = useState('');
+  const [editInterfacePort, setEditInterfacePort] = useState('');
+  const [editInterfaceStatus, setEditInterfaceStatus] = useState(true);
 
   // Settings states
   const [settingsValues, setSettingsValues] = useState<Record<string, string>>({});
+  const [apiTokens, setApiTokens] = useState<ApiTokens>({}); // New state for API tokens
+  const [newApiTokenName, setNewApiTokenName] = useState('');
+  const [newApiTokenValue, setNewApiTokenValue] = useState('');
+  const [showApiTokenForm, setShowApiTokenForm] = useState(false);
 
   useEffect(() => {
     checkAuth();
@@ -129,6 +141,14 @@ function App() {
       if (response.success && response.data) {
         setData(response.data);
         setSettingsValues(response.data.settings);
+        try {
+          // Attempt to parse api_tokens from settings
+          const parsedApiTokens = JSON.parse(response.data.settings.api_tokens || '{}');
+          setApiTokens(parsedApiTokens);
+        } catch (e) {
+          console.error("Failed to parse API tokens from settings:", e);
+          setApiTokens({}); // Fallback to empty object on error
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -202,6 +222,7 @@ function App() {
           expires: clientExpires,
           traffic: clientTraffic,
           note: clientNote,
+          status: clientStatus, // Pass client status
         });
         if (response.success) {
           showMessage('Client updated successfully!');
@@ -258,6 +279,7 @@ function App() {
     setClientTraffic('');
     setClientWgId('0');
     setClientNote('');
+    setClientStatus(true); // Reset client status
   };
 
   const editClient = (client: Client) => {
@@ -267,10 +289,12 @@ function App() {
     setClientTraffic(client.traffic);
     setClientWgId(client.wg.toString());
     setClientNote(client.note);
+    setClientStatus(client.status); // Set client status for editing
     setShowClientForm(true);
   };
 
   const deleteClient = async (name: string) => {
+    // Replaced window.confirm with a custom modal/dialog in a real app
     if (!confirm(`Are you sure you want to delete client "${name}"?`)) return;
     
     try {
@@ -328,6 +352,95 @@ function App() {
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Update failed', true);
+    }
+  };
+
+  const handleAddApiToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newApiTokenName || !newApiTokenValue) {
+      showMessage('Please provide both name and token.', true);
+      return;
+    }
+    try {
+      setLoading(true);
+      const response = await apiClient.addApiToken(newApiTokenName, newApiTokenValue);
+      if (response.success) {
+        showMessage('API token added/updated successfully!');
+        setNewApiTokenName('');
+        setNewApiTokenValue('');
+        setShowApiTokenForm(false);
+        await loadData(); // Reload data to get updated API tokens
+      }
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Failed to add/update API token', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteApiToken = async (name: string) => {
+    // Replaced window.confirm with a custom modal/dialog in a real app
+    if (!confirm(`Are you sure you want to delete API token "${name}"?`)) return;
+    try {
+      setLoading(true);
+      const response = await apiClient.deleteApiToken(name);
+      if (response.success) {
+        showMessage('API token deleted successfully!');
+        await loadData(); // Reload data to get updated API tokens
+      }
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Failed to delete API token', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const editInterface = (iface: Interface) => {
+    setEditingInterface(iface);
+    setEditInterfaceAddressRange(iface.address_range);
+    setEditInterfacePort(iface.port.toString());
+    setEditInterfaceStatus(iface.status);
+    setShowEditInterfaceForm(true);
+  };
+
+  const handleEditInterfaceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingInterface) return;
+
+    try {
+      setLoading(true);
+      const response = await apiClient.updateInterface(`wg${editingInterface.wg}`, {
+        address: editInterfaceAddressRange,
+        port: parseInt(editInterfacePort),
+        status: editInterfaceStatus,
+      });
+      if (response.success) {
+        showMessage('Interface updated successfully!');
+        setShowEditInterfaceForm(false);
+        setEditingInterface(null);
+        await loadData();
+      }
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Interface update failed', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteInterface = async (wg_id: number) => {
+    // Replaced window.confirm with a custom modal/dialog in a real app
+    if (!confirm(`Are you sure you want to delete WireGuard interface wg${wg_id} and all its associated clients? This action cannot be undone.`)) return;
+    try {
+      setLoading(true);
+      const response = await apiClient.deleteInterface(wg_id);
+      if (response.success) {
+        showMessage(`Interface wg${wg_id} deleted successfully!`);
+        await loadData();
+      }
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Failed to delete interface', true);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -747,6 +860,27 @@ function App() {
                     </select>
                   </div>
                 )}
+                {editingClient && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
+                    <label htmlFor="client-status-toggle" className="flex items-center cursor-pointer">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          id="client-status-toggle"
+                          className="sr-only"
+                          checked={clientStatus}
+                          onChange={(e) => setClientStatus(e.target.checked)}
+                        />
+                        <div className="block bg-gray-600 w-14 h-8 rounded-full"></div>
+                        <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition ${clientStatus ? 'translate-x-full bg-blue-600' : ''}`}></div>
+                      </div>
+                      <div className="ml-3 text-gray-300 font-medium">
+                        {clientStatus ? 'Active' : 'Inactive'}
+                      </div>
+                    </label>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">Note</label>
                   <textarea
@@ -894,7 +1028,7 @@ function App() {
           </div>
         </div>
 
-        {/* Interface Form Modal */}
+        {/* Add Interface Form Modal */}
         {showInterfaceForm && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
             <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700 animate-scale-in">
@@ -943,7 +1077,75 @@ function App() {
           </div>
         )}
 
+        {/* Edit Interface Form Modal */}
+        {showEditInterfaceForm && editingInterface && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700 animate-scale-in">
+              <h3 className="text-lg font-semibold mb-4 text-white">Edit Interface wg{editingInterface.wg}</h3>
+              <form onSubmit={handleEditInterfaceSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Address Range</label>
+                  <input
+                    type="text"
+                    value={editInterfaceAddressRange}
+                    onChange={(e) => setEditInterfaceAddressRange(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Port</label>
+                  <input
+                    type="number"
+                    value={editInterfacePort}
+                    onChange={(e) => setEditInterfacePort(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
+                  <label htmlFor="interface-status-toggle" className="flex items-center cursor-pointer">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        id="interface-status-toggle"
+                        className="sr-only"
+                        checked={editInterfaceStatus}
+                        onChange={(e) => setEditInterfaceStatus(e.target.checked)}
+                      />
+                      <div className="block bg-gray-600 w-14 h-8 rounded-full"></div>
+                      <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition ${editInterfaceStatus ? 'translate-x-full bg-blue-600' : ''}`}></div>
+                    </div>
+                    <div className="ml-3 text-gray-300 font-medium">
+                      {editInterfaceStatus ? 'Active' : 'Inactive'}
+                    </div>
+                  </label>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all duration-200 transform hover:scale-105"
+                  >
+                    {loading ? 'Saving...' : 'Update Interface'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowEditInterfaceForm(false)}
+                    className="flex-1 bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Common Settings */}
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">
+          <h3 className="font-semibold text-white mb-4">General Settings</h3>
           <div className="space-y-6">
             {commonSettings.map((setting) => (
               <div key={setting.key}>
@@ -975,6 +1177,158 @@ function App() {
           </div>
         </div>
 
+        {/* Telegram Bot Settings */}
+        <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">
+          <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
+            <Bot className="w-5 h-5 text-purple-400" /> Telegram Bot Settings
+          </h3>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Telegram Bot Status</label>
+              <label htmlFor="telegram-bot-status-toggle" className="flex items-center cursor-pointer">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    id="telegram-bot-status-toggle"
+                    className="sr-only"
+                    checked={settingsValues['telegram_bot_status'] === '1'}
+                    onChange={(e) => updateSetting('telegram_bot_status', e.target.checked ? '1' : '0')}
+                  />
+                  <div className="block bg-gray-600 w-14 h-8 rounded-full"></div>
+                  <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition ${settingsValues['telegram_bot_status'] === '1' ? 'translate-x-full bg-blue-600' : ''}`}></div>
+                </div>
+                <div className="ml-3 text-gray-300 font-medium">
+                  {settingsValues['telegram_bot_status'] === '1' ? 'Enabled' : 'Disabled'}
+                </div>
+              </label>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Admin Telegram ID</label>
+              <input
+                type="text"
+                value={settingsValues['telegram_bot_admin_id'] || ''}
+                onChange={(e) => updateSetting('telegram_bot_admin_id', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                placeholder="Your Telegram User ID"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Bot Token</label>
+              <input
+                type="text"
+                value={settingsValues['telegram_bot_token'] || ''}
+                onChange={(e) => updateSetting('telegram_bot_token', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                placeholder="Your Telegram Bot Token"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Prices (JSON)</label>
+              <textarea
+                value={settingsValues['telegram_bot_prices'] || ''}
+                onChange={(e) => updateSetting('telegram_bot_prices', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                rows={4}
+                placeholder='{"per_month":75000,"per_gb":4000}'
+              />
+              <p className="text-xs text-gray-500 mt-1">Enter as a valid JSON string, e.g., `{"per_month":75000,"per_gb":4000}`</p>
+            </div>
+          </div>
+        </div>
+
+        {/* API Tokens Management */}
+        <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">
+          <h3 className="font-semibold text-white mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Key className="w-5 h-5 text-yellow-400" /> API Tokens
+            </div>
+            <button
+              onClick={() => setShowApiTokenForm(true)}
+              className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1 rounded-lg text-sm hover:bg-blue-700 transition-all duration-200"
+            >
+              <Plus className="w-4 h-4" /> Add Token
+            </button>
+          </h3>
+
+          {showApiTokenForm && (
+            <div className="bg-gray-700/50 rounded-lg p-4 mb-4 border border-gray-600 animate-fade-in">
+              <form onSubmit={handleAddApiToken} className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Token Name</label>
+                  <input
+                    type="text"
+                    value={newApiTokenName}
+                    onChange={(e) => setNewApiTokenName(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                    placeholder="e.g., my_app_token"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Token Value</label>
+                  <input
+                    type="text"
+                    value={newApiTokenValue}
+                    onChange={(e) => setNewApiTokenValue(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                    placeholder="e.g., some_secret_string_123"
+                    required
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all duration-200"
+                  >
+                    {loading ? 'Saving...' : 'Save Token'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowApiTokenForm(false)}
+                    className="flex-1 bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 transition-all duration-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {Object.keys(apiTokens).length === 0 ? (
+            <div className="text-center py-4 text-gray-400">No API tokens configured.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-700/50 border-b border-gray-700">
+                  <tr>
+                    <th className="text-left p-3 font-medium text-gray-300">Name</th>
+                    <th className="text-left p-3 font-medium text-gray-300">Token</th>
+                    <th className="text-left p-3 font-medium text-gray-300">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-700">
+                  {Object.entries(apiTokens).map(([name, token]) => (
+                    <tr key={name} className="hover:bg-gray-700/30 transition-colors duration-200">
+                      <td className="p-3 text-white font-medium">{name}</td>
+                      <td className="p-3 text-gray-400 font-mono text-sm break-all">{token}</td>
+                      <td className="p-3">
+                        <button
+                          onClick={() => handleDeleteApiToken(name)}
+                          className="p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
+                          title="Delete Token"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
         {/* Interfaces */}
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700">
           <div className="p-6 border-b border-gray-700">
@@ -998,11 +1352,25 @@ function App() {
                         <p className="text-sm text-gray-400">{iface.address_range}</p>
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex items-center gap-2">
                       <p className="text-sm font-medium text-white">Port {iface.port}</p>
                       <p className="text-xs text-gray-400">
                         {iface.status ? 'Active' : 'Inactive'}
                       </p>
+                      <button
+                        onClick={() => editInterface(iface)}
+                        className="p-2 text-gray-400 hover:bg-gray-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
+                        title="Edit Interface"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteInterface(iface.wg)}
+                        className="p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
+                        title="Delete Interface"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 ))}
