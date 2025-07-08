@@ -236,6 +236,17 @@ async def manage_resources():
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)
+            
+            # New: Delete interface
+            elif action == 'delete':
+                wg_id = data.get('wg_id')
+                if wg_id is None:
+                    return error_response("Missing wg_id for interface deletion", 400)
+                success, message = await asyncio.to_thread(candy_panel._delete_interface, wg_id)
+                if not success:
+                    return error_response(message, 400)
+                return success_response(message)
+
             else:
                 return error_response(f"Invalid action '{action}' for interface resource", 400)
 
