@@ -24,12 +24,12 @@ A modern, beautiful web interface for managing WireGuard VPN servers with compre
 ```bash
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Panel/main/install.sh)"
 ```
-- Panel Port : 3445
-- API Port : 3445
+- Panel Port : 3446
+- API Port : 3446
 
 ### Prerequisites
 
-- Node.js 18+ and npm
+- Node.js 20+ and npm
 - Python 3.8+
 - WireGuard installed on your server
 
@@ -70,7 +70,7 @@ pip install fastapi uvicorn sqlite3 subprocess psutil
 
 3. **Start the backend server**
 ```bash
-python -m uvicorn main:app --host 0.0.0.0 --port 3445 --reload
+python main.py
 ```
 
 4. **Access the application**
@@ -85,85 +85,33 @@ python -m uvicorn main:app --host 0.0.0.0 --port 3445 --reload
 - **Tailwind CSS** for styling
 - **Framer Motion** for animations
 - **React Router** for navigation
-- **Recharts** for data visualization
 
 ### Backend Stack
-- **FastAPI** for high-performance API
+- **Flask** for high-performance API
 - **SQLite** for database management
 - **Pydantic** for data validation
 - **WireGuard** integration for VPN management
-
-## 📁 Project Structure
-
-```
-candy-panel/
-├── src/
-│   ├── components/          # Reusable UI components
-│   │   ├── Dashboard/       # Dashboard-specific components
-│   │   ├── Clients/         # Client management components
-│   │   ├── Layout/          # Layout components (Header, Sidebar)
-│   │   └── ui/              # Base UI components (shadcn/ui)
-│   ├── pages/               # Page components
-│   ├── services/            # API service layer
-│   ├── contexts/            # React contexts (Auth, etc.)
-│   ├── hooks/               # Custom React hooks
-│   ├── types/               # TypeScript type definitions
-│   └── config/              # Configuration files
-├── backend/
-│   ├── core.py              # Core WireGuard management logic
-│   ├── db.py                # Database operations
-│   └── main.py              # FastAPI application
-└── public/                  # Static assets
-```
 
 ## 🔧 Configuration
 
 ### Environment Variables
 
-Create a `.env` file in the root directory:
+For installing Telegram BOT you must enter your api_id , api_hash , so put them in var and export on env:
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000
+export TELEGRAM_API_ID=1
+export TELEGRAM_API_HASH=ab12
 ```
 
 ### Backend Configuration
 
 The backend automatically creates a SQLite database and initializes default settings on first run.
 
-## 📖 API Documentation
-
-### Authentication
-- `POST /login` - System status check
-- `POST /check` - User authentication
-
-### Client Management
-- `GET /clients` - List all clients
-- `POST /clients` - Create new client
-- `PUT /clients/:name` - Update client
-- `DELETE /clients/:name` - Delete client
-- `GET /clients/:name/config` - Get client configuration
-
-### Interface Management
-- `GET /interfaces` - List all interfaces
-- `POST /interfaces` - Create new interface
-- `PUT /interfaces/:name` - Update interface
-
-### Server Management
-- `GET /dashboard` - Get server statistics
-- `POST /sync` - Trigger synchronization
-- `GET /settings` - Get all settings
-- `PUT /settings/:key` - Update specific setting
-
-### API Tokens
-- `GET /api-tokens` - List API tokens
-- `POST /api-tokens` - Create API token
-- `DELETE /api-tokens/:name` - Delete API token
-
 ## 🎯 Usage
 
 ### First Time Setup
 
-1. **Access the application** at `http://localhost:5173`
+1. **Access the application** at `http://localhost:3446`
 2. **Run the installation wizard** to configure your server
 3. **Set up admin credentials** and server settings
 4. **Create your first WireGuard interface**
@@ -179,7 +127,7 @@ The backend automatically creates a SQLite database and initializes default sett
 
 ### Server Configuration
 
-1. Go to the **Server** page to configure global settings
+1. Go to the **Settings** page to configure global settings
 2. Set DNS servers, MTU values, and reset schedules
 3. Enable/disable auto-backup functionality
 4. Monitor server statistics and performance
@@ -210,7 +158,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [WireGuard](https://www.wireguard.com/) for the amazing VPN technology
 - [shadcn/ui](https://ui.shadcn.com/) for the beautiful UI components
-- [Flask](https://flask.palletsprojects.com/en/stable/) for the excellent Python framework
+- [FastAPI](https://fastapi.tiangolo.com/) for the excellent Python framework
 - [React](https://reactjs.org/) and [Vite](https://vitejs.dev/) for the frontend tools (Frontend built by [BoltAI](https://bolt.new))
 
 ## 📞 Support
@@ -224,6 +172,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🗺️ Roadmap
 
 - [ ] Telegram bot integration for automated sales
+- [ ] IPV6 Support
 - [ ] Advanced analytics and reporting
 - [ ] Docker containerization
 - [ ] Manual Port for panel and api
