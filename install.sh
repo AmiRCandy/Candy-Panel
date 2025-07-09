@@ -29,11 +29,11 @@ UNDERLINE='\e[4m'
 
 print_header() {
     echo -e "\n${BOLD}${CYAN}====================================================${RESET}"
-    echo -e "${BOLD}${CYAN}  Candy Panel Deployment Script                     ${RESET}"
+    echo -e "${BOLD}${CYAN} Candy Panel Deployment Script                      ${RESET}"
     echo -e "${BOLD}${CYAN}====================================================${RESET}"
-    echo -e "${BOLD}${YELLOW}  Project: $PROJECT_NAME${RESET}"
-    echo -e "${BOLD}${YELLOW}  Repo: $REPO_URL${RESET}"
-    echo -e "${BOLD}${YELLOW}  User: $LINUX_USER${RESET}"
+    echo -e "${BOLD}${YELLOW} Project: $PROJECT_NAME${RESET}"
+    echo -e "${BOLD}${YELLOW} Repo: $REPO_URL${RESET}"
+    echo -e "${BOLD}${YELLOW} User: $LINUX_USER${RESET}"
     echo -e "${BOLD}${CYAN}====================================================${RESET}\n"
     sleep 1
 }
@@ -68,11 +68,16 @@ check_prerequisites() {
     print_info "Checking for required system packages..."
     local missing_packages=()
     # Removed nginx and certbot
-    for cmd in git python3 ufw python3.10-venv curl; do
+    for cmd in git python3 ufw cron python3.10-venv; do # Removed python3.10-venv as it's often part of python3-full or can be installed via pip
         if ! command -v "$cmd" &> /dev/null; then
             missing_packages+=("$cmd")
         fi
     done
+
+    # Add curl for NVM installation check
+    if ! command -v curl &> /dev/null; then
+        missing_packages+=("curl")
+    fi
 
     if [ ${#missing_packages[@]} -gt 0 ]; then
         print_warning "The following required packages are not installed: ${missing_packages[*]}"
@@ -106,6 +111,61 @@ check_prerequisites() {
     fi
     sleep 1
 }
+
+setup_permissions() {
+    print_info "--- Setting up System Permissions and Installing Core Dependencies ---"
+    sleep 1
+
+    # Prompt for CandyPanel User
+    read -p "$(echo -e "${YELLOW}INPUT:${RESET} Please enter the username that will run the CandyPanel application (e.g., candypaneluser): ")" CANDYPANEL_USER
+
+    # Validate if the user exists
+    if ! id "$CANDYPANEL_USER" &>/dev/null; then
+        print_error "Error: User '$CANDYPANEL_USER' does not exist."
+        print_error "Please create the user first (e.g., 'sudo adduser $CANDYPANEL_USER') or enter an existing one."
+        exit 1
+    fi
+
+    echo "User '$CANDYPANEL_USER' selected for CandyPanel operations."
+
+    # Install WireGuard, qrencode, and psutil system packages
+    print_info "Installing core system packages: wireguard, qrencode, python3-psutil..."
+    sudo apt install -y wireguard qrencode python3-psutil || { print_error "Failed to install core system packages."; exit 1; }
+    print_success "Core system packages installed."
+
+    # Configure sudoers for the CandyPanel User
+    print_info "Configuring sudoers for user '$CANDYPANEL_USER' to allow specific commands without password..."
+
+    SUDOERS_FILE="/etc/sudoers.d/candypanel_permissions"
+
+    # Define the commands the user is allowed to run with sudo without password.
+    # We specify full paths to executables to enhance security and prevent path injection.
+    # The '*' wildcard allows any arguments to these commands.
+    # WARNING: NOPASSWD should be used with caution and only for specific, necessary commands.
+    cat <<EOF | sudo tee "$SUDOERS_FILE" > /dev/null
+# Allow $CANDYPANEL_USER to manage WireGuard, UFW, systemctl, and cron for CandyPanel
+$CANDYPANEL_USER ALL=(ALL) NOPASSWD: \\
+    /usr/bin/wg genkey, \\
+    /usr/bin/wg pubkey, \\
+    /usr/bin/wg show *, \\
+    /usr/bin/wg syncconf *, \\
+    /usr/bin/wg-quick up *, \\
+    /usr/bin/wg-quick down *, \\
+    /usr/bin/systemctl enable wg-quick@*, \\
+    /usr/bin/systemctl start wg-quick@*, \\
+    /usr/bin/systemctl stop wg-quick@*, \\
+    /usr/sbin/ufw allow *, \\
+    /usr/sbin/ufw delete *, \\
+    /usr/bin/crontab
+EOF
+
+    # Set secure permissions for the sudoers file (read-only for root, no other permissions)
+    sudo chmod 0440 "$SUDOERS_FILE" || { print_error "Failed to set permissions for sudoers file."; exit 1; }
+    print_success "Sudoers configured successfully in '$SUDOERS_FILE'."
+    print_info "You can verify the sudoers file with: 'sudo visudo -cf $SUDOERS_FILE'"
+    sleep 1
+}
+
 
 install_nodejs_with_nvm() {
     print_info "--- Installing Node.js and npm using NVM ---"
@@ -166,7 +226,7 @@ clone_or_update_repo() {
         # Corrected: Create parent directory correctly if it doesn't exist
         sudo mkdir -p "$(dirname "$PROJECT_ROOT")"
 
-        sudo git clone "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
+        sudo git clone --branch main --single-branch "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
         sudo chown -R "$LINUX_USER:$LINUX_USER" "$PROJECT_ROOT" || { print_warning "Could not change ownership of $PROJECT_ROOT to $LINUX_USER. Manual intervention might be needed for permissions."; }
         print_success "Repository cloned successfully."
     fi
@@ -220,7 +280,9 @@ EOF
     print_info "Reloading Systemd daemon, enabling and starting Flask service..."
     sudo systemctl daemon-reload || { print_error "Failed to reload Systemd daemon."; exit 1; }
     sudo systemctl enable "${PROJECT_NAME}_flask.service" || { print_error "Failed to enable Flask service."; exit 1; }
+    sudo systemctl enable cron
     sudo systemctl start "${PROJECT_NAME}_flask.service" || { print_error "Failed to start Flask service."; exit 1; }
+    sudo systemctl start cron
     print_success "Flask service started and enabled to run on boot."
     print_info "You can check its status with: sudo systemctl status ${PROJECT_NAME}_flask.service"
     print_info "View logs with: journalctl -u ${PROJECT_NAME}_flask.service --since '1 hour ago'"
@@ -305,6 +367,7 @@ main() {
     confirm_action "This script will deploy your Candy panel with Flask serving both frontend and backend. Ensure you have updated the REPO_URL variable in the script."
 
     check_prerequisites
+    setup_permissions # Call the new function here
     install_nodejs_with_nvm
     clone_or_update_repo
     deploy_backend
@@ -314,10 +377,10 @@ main() {
     # Removed setup_ssl as Nginx and Certbot are not used
 
     echo -e "\n${BOLD}${GREEN}====================================================${RESET}"
-    echo -e "${BOLD}${GREEN}  Deployment Complete!                              ${RESET}"
+    echo -e "${BOLD}${GREEN} Deployment Complete!                               ${RESET}"
     echo -e "${BOLD}${GREEN}====================================================${RESET}"
-    echo -e "${BOLD}${GREEN}  Your Candy Panel should now be accessible at:${RESET}"
-    echo -e "${BOLD}${GREEN}  http://YOUR_SERVER_IP:$BACKEND_PORT${RESET}"
+    echo -e "${BOLD}${GREEN} Your Candy Panel should now be accessible at:${RESET}"
+    echo -e "${BOLD}${GREEN} http://YOUR_SERVER_IP:$BACKEND_PORT${RESET}"
     print_warning "Remember to replace YOUR_SERVER_IP with your actual server's public IP address."
     print_warning "Note: SSL is NOT configured with this setup. For HTTPS, you will need to add a reverse proxy like Nginx or Caddy."
     echo -e "${BOLD}${GREEN}====================================================${RESET}\n"
