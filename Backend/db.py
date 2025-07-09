@@ -1,7 +1,7 @@
 # db.py
 import sqlite3
 import time
-import json
+import json , os
 from datetime import datetime
 
 class SQLite:
@@ -9,7 +9,8 @@ class SQLite:
         """
         Initializes the SQLite database connection.
         """
-        self.db_path = db_path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.db_path = os.path.join(script_dir, db_path)
         self.conn = None
         self.cursor = None
         self._connect()
