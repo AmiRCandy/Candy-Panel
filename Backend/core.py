@@ -332,8 +332,8 @@ Address = {wg_address_range}
 ListenPort = {wg_port}
 PrivateKey = {private_key}
 SaveConfig = true
-PostUp = ufw allow {wg_port}/udp
-PostDown = ufw delete allow {wg_port}/udp
+PostUp = iptables -I INPUT -p udp --dport {wg_port} -j ACCEPT
+PostDown = iptables -D INPUT -p udp --dport {wg_port} -j ACCEPT
         """.strip()
 
         with open(wg_conf_path, "w") as f:
@@ -474,7 +474,7 @@ DNS = {dns}
 MTU = {mtu_value}
 
 [Peer]
-PublicKey = {interface_wg['public_key']} # Server's public key
+PublicKey = {interface_wg['public_key']}
 Endpoint = {server_ip}:{interface_wg['port']}
 AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
@@ -600,8 +600,8 @@ PrivateKey = {private_key}
 Address = {address_range}
 ListenPort = {port}
 SaveConfig = true
-PostUp = ufw allow {port}/udp
-PostDown = ufw delete allow {port}/udp
+PostUp = iptables -I INPUT -p udp --dport {port} -j ACCEPT
+PostDown = iptables -D INPUT -p udp --dport {port} -j ACCEPT
 """
         try:
             with open(path, "w") as f:
@@ -761,14 +761,14 @@ PostDown = ufw delete allow {port}/udp
         client_config = f"""
 [Interface]
 PrivateKey = {client['private_key']}
-Address = {client['address']}/32 # Corrected: Client's specific IP with /32 CIDR
+Address = {client['address']}/32
 DNS = {dns}
 MTU = {mtu_value}
 
 [Peer]
-PublicKey = {interface['public_key']} # Server's public key
+PublicKey = {interface['public_key']}
 Endpoint = {server_ip}:{interface['port']}
-AllowedIPs = 0.0.0.0/0, ::/0 # Allow all IPv4 and IPv6 traffic
+AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
 """
         return True, client_config
