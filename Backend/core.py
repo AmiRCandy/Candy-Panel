@@ -389,7 +389,8 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
         current_dir = os.path.abspath(os.path.dirname(__file__))
         cron_script_path = os.path.join(current_dir, 'cron.py')
-        cron_line = f"*/15 * * * * python3 {cron_script_path} >> /var/log/candy-sync.log 2>&1"
+        backend_dir = os.path.dirname(cron_script_path)
+        cron_line = f"*/15 * * * * cd {backend_dir} && python3 {cron_script_path} >> /var/log/candy-sync.log 2>&1"
         self.run_command(f'(crontab -l 2>/dev/null; echo "{cron_line}") | crontab -')
         return True, 'Installed successfully!'
 
