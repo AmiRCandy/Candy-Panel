@@ -1224,8 +1224,8 @@ function App() {
               <label className="block text-sm font-medium text-gray-300 mb-2">API ID</label>
               <input
                 type="text"
-                value={settingsValues['telegram_bot_api_id'] || ''}
-                onChange={(e) => updateSetting('telegram_bot_api_id', e.target.value)}
+                value={settingsValues['telegram_api_hash'] || ''}
+                onChange={(e) => updateSetting('telegram_api_id', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                 placeholder="Your API ID"
               />
@@ -1234,8 +1234,8 @@ function App() {
               <label className="block text-sm font-medium text-gray-300 mb-2">API HASH</label>
               <input
                 type="text"
-                value={settingsValues['telegram_bot_api_hash'] || ''}
-                onChange={(e) => updateSetting('telegram_bot_api_hash', e.target.value)}
+                value={settingsValues['telegram_api_hash'] || ''}
+                onChange={(e) => updateSetting('telegram_api_hash', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                 placeholder="Your API HASH"
               />
@@ -1245,7 +1245,7 @@ function App() {
               <input
                 type="text"
                 value={settingsValues['admin_card_number'] || ''}
-                onChange={(e) => updateSetting('admin_card_numbers', e.target.value)}
+                onChange={(e) => updateSetting('admin_card_number', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                 placeholder="Your Card number for seller"
               />
@@ -1253,8 +1253,8 @@ function App() {
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">Prices (JSON)</label>
               <textarea
-                value={settingsValues['telegram_bot_prices'] || ''}
-                onChange={(e) => updateSetting('telegram_bot_prices', e.target.value)}
+                value={settingsValues['prices'] || ''}
+                onChange={(e) => updateSetting('prices', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                 rows={4}
                 placeholder='{"1Month":75000,"1GB":4000}'
