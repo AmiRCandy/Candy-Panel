@@ -1,6 +1,6 @@
 import { ApiResponse, AuthData, AllData } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_APP_API_URL || 'http://serverip:3445';
+const API_BASE_URL = `${window.location.protocol}//${window.location.host}`;
 
 class ApiClient {
   private token: string | null = null;
