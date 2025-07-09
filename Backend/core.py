@@ -331,9 +331,18 @@ AllowedIPs = {client_ip}/32
 Address = {wg_address_range}
 ListenPort = {wg_port}
 PrivateKey = {private_key}
-SaveConfig = true
-PostUp = iptables -I INPUT -p udp --dport {wg_port} -j ACCEPT
-PostDown = iptables -D INPUT -p udp --dport {wg_port} -j ACCEPT
+MTU = 1420
+DNS = 8.8.8.8
+
+PostUp = iptables -I INPUT -p udp --dport ${wg_port} -j ACCEPT
+PostUp = iptables -I FORWARD -i $eth0 -o $wg0 -j ACCEPT
+PostUp = iptables -I FORWARD -i $wg0 -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -o $eth0 -j MASQUERADE
+
+PostDown = iptables -D INPUT -p udp --dport ${wg_port} -j ACCEPT
+PostDown = iptables -D FORWARD -i $eth0 -o $wg0 -j ACCEPT
+PostDown = iptables -D FORWARD -i $wg0 -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -o $eth0 -j MASQUERADE
         """.strip()
 
         with open(wg_conf_path, "w") as f:
@@ -599,9 +608,18 @@ PersistentKeepalive = 25
 PrivateKey = {private_key}
 Address = {address_range}
 ListenPort = {port}
-SaveConfig = true
-PostUp = iptables -I INPUT -p udp --dport {port} -j ACCEPT
-PostDown = iptables -D INPUT -p udp --dport {port} -j ACCEPT
+MTU = 1420
+DNS = 8.8.8.8
+
+PostUp = iptables -I INPUT -p udp --dport ${port} -j ACCEPT
+PostUp = iptables -I FORWARD -i $eth0 -o $wg{new_wg_id} -j ACCEPT
+PostUp = iptables -I FORWARD -i $wg{new_wg_id} -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -o $eth0 -j MASQUERADE
+
+PostDown = iptables -D INPUT -p udp --dport ${port} -j ACCEPT
+PostDown = iptables -D FORWARD -i $eth0 -o $wg{new_wg_id} -j ACCEPT
+PostDown = iptables -D FORWARD -i $wg{new_wg_id} -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -o $eth0 -j MASQUERADE
 """
         try:
             with open(path, "w") as f:
