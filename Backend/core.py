@@ -381,6 +381,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
 
         # Update initial settings (e.g., server IP, DNS, admin credentials)
         self.db.update('settings', {'value': server_ip}, {'key': 'server_ip'})
+        self.db.update('settings', {'value': server_ip}, {'key': 'custom_endpont'})
         self.db.update('settings', {'value': wg_dns}, {'key': 'dns'})
         # IMPORTANT: In a real app, hash the admin password before storing!
         admin_data = json.dumps({'user': admin_user, 'password': admin_password})
@@ -474,7 +475,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
             return False, str(e)
 
         server_pubkey = self._get_server_public_key(wg_id)
-        server_ip = self.db.get('settings', where={'key': 'server_ip'})['value']
+        server_ip = self.db.get('settings', where={'key': 'custom_endpont'})['value']
         dns = self.db.get('settings', where={'key': 'dns'})['value']
         # MTU might not be available if not set in settings, provide a default
         mtu = self.db.get('settings', where={'key': 'mtu'})
@@ -771,7 +772,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         mtu = self.db.get('settings', where={'key': 'mtu'})
         mtu_value = mtu['value'] if mtu else '1420' # Default MTU if not found
 
-        server_ip = self.db.get('settings', where={'key': 'server_ip'})['value']
+        server_ip = self.db.get('settings', where={'key': 'custom_endpont'})['value']
 
         client_config = f"""
 [Interface]
