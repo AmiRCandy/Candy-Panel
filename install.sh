@@ -344,6 +344,7 @@ configure_frontend_api_url() {
 
 
 # --- Firewall Configuration ---
+# --- Firewall Configuration ---
 configure_firewall() {
     print_info "--- Configuring Firewall (UFW) ---"
     sleep 1
@@ -353,9 +354,21 @@ configure_firewall() {
     print_success "UFW is active."
     sleep 1
 
+    # Get the current SSH port
+    local ssh_port
+    if [ -n "$SSH_CLIENT" ]; then
+        ssh_port=$(echo "$SSH_CLIENT" | awk '{print $3}')
+        print_info "Detected SSH port: $ssh_port"
+        print_info "Allowing SSH access on port $ssh_port..."
+        sudo ufw allow "$ssh_port"/tcp || { print_error "Failed to allow SSH port $ssh_port through UFW."; exit 1; }
+        print_success "SSH port $ssh_port allowed for external access."
+    else
+        print_warning "Could not detect SSH port from \$SSH_CLIENT. Please ensure SSH access is configured manually if needed."
+    fi
+
     # Only allow the backend port, as Flask serves everything directly
     print_info "Allowing external access to port $BACKEND_PORT for Flask application..."
-    sudo ufw allow $BACKEND_PORT/tcp || { print_error "Failed to allow port $BACKEND_PORT through UFW."; exit 1; }
+    sudo ufw allow "$BACKEND_PORT"/tcp || { print_error "Failed to allow port $BACKEND_PORT through UFW."; exit 1; }
     print_success "Port $BACKEND_PORT allowed for external access."
 
     print_info "You can check UFW status with: sudo ufw status"
