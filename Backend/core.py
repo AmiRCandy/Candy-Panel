@@ -304,7 +304,8 @@ AllowedIPs = {client_ip}/32
         print("[+] Creating /etc/wireguard if not exists...")
         os.makedirs("/etc/wireguard", exist_ok=True)
         os.chmod("/etc/wireguard", 0o700)
-
+        env = os.environ.copy()
+        env["AP_PORT"] = '3446'
         wg_id = 0 # Default initial interface ID
         server_private_key_path = SERVER_PRIVATE_KEY_PATH.replace('X', str(wg_id))
         server_public_key_path = SERVER_PUBLIC_KEY_PATH.replace('X', str(wg_id))
@@ -1141,8 +1142,8 @@ PersistentKeepalive = 25
             self.db.update('settings', {'value': '0'}, {'key': 'uptime'})
             if os.path.exists(uptime_file):
                 os.remove(uptime_file) # Remove corrupted file to allow recreation
-
-
+        if not self.db.get('settings', where={'key': 'ap_port'})['value'] == os.environ.get('AP_PORT',3446) :
+            self.db.update('settings', {'value': os.environ.get('AP_PORT',3446)}, {'key': 'ap_port'})
         print("[*] Synchronization process completed.")
 
 # Custom exception for command execution errors
