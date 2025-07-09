@@ -68,7 +68,7 @@ check_prerequisites() {
     print_info "Checking for required system packages..."
     local missing_packages=()
     # Removed nginx and certbot
-    for cmd in git python3 ufw cron python3.10-venv; do # Removed python3.10-venv as it's often part of python3-full or can be installed via pip
+    for cmd in git python3 ufw cron python3.10-venv build-essential python3-dev; do # Removed python3.10-venv as it's often part of python3-full or can be installed via pip
         if ! command -v "$cmd" &> /dev/null; then
             missing_packages+=("$cmd")
         fi
@@ -249,7 +249,7 @@ deploy_backend() {
 
     print_info "Installing Python dependencies (Flask etc.)..."
     # Assuming requirements.txt exists and contains all necessary packages
-    pip install pyrogram flask[async] requests flask_cors psutil || { print_error "Failed to install Python dependencies."; exit 1; }
+    pip install pyrogram flask[async] requests flask_cors psutil netifaces  || { print_error "Failed to install Python dependencies."; exit 1; }
     print_success "Python dependencies installed."
     sleep 1
 
