@@ -19,13 +19,19 @@ A modern, beautiful web interface for managing WireGuard VPN servers with compre
 
 ## 🚀 Quick Start
 
-### 🚀 One command install
+### 🚀 One line command install
 
 ```bash
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Panel/main/install.sh)"
 ```
-- Panel Port : 3446
-- API Port : 3446
+- Panel Default Port : 3446
+- API Default Port : 3446
+
+### 🚀 One line command uninstall
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Panel/main/uninstall.sh)"
+```
 
 ### Prerequisites
 
@@ -171,12 +177,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🗺️ Roadmap
 
-- [ ] Telegram bot integration for automated sales
-- [ ] Auto Tunnel installation for both servers
+- [x] Telegram bot integration for automated sales
 - [ ] IPV6 Support
 - [ ] Advanced analytics and reporting
 - [ ] Docker containerization
-- [ ] Manual Port for panel and api
+- [x] Manual Port for panel and api
 - [ ] Automatic tunnel installation
 - [ ] Theme customization
 
