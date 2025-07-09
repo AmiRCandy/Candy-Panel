@@ -175,7 +175,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] IPV6 Support
 - [ ] Advanced analytics and reporting
 - [ ] Docker containerization
-- [ ] Manual Port for panel and api
+- [x] Manual Port for panel and api
 - [ ] Automatic tunnel installation
 - [ ] Theme customization
 
