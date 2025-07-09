@@ -857,5 +857,5 @@ def serve_frontend(path):
 
 # This is for development purposes only. For production, use a WSGI server like Gunicorn.
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=3446)
+    app.run(debug=True, host="0.0.0.0", port={int(os.environ.get('AP_PORT',3446))})
 
