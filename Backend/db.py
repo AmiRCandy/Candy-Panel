@@ -111,6 +111,7 @@ class SQLite:
         """
         default_settings = [
             {'key': 'server_ip', 'value': '192.168.1.100'},
+            {'key': 'custom_endpont', 'value': '192.168.1.100'},
             {'key': 'session_token', 'value': 'NONE'},
             {'key': 'dns', 'value': '8.8.8.8'},
             {'key': 'admin', 'value': '{"user":"admin","password":"admin"}'},
