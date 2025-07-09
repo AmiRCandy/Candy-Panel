@@ -70,7 +70,7 @@ confirm_action() {
 check_prerequisites() {
     print_info "Checking for required system packages..."
     local missing_packages=()
-    for cmd in git python3 ufw cron python3.10-venv build-essential python3-dev; do
+    for cmd in git python3 ufw cron python3.10-venv build-essential python3-dev openresolv; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_packages+=("$cmd")
         fi
