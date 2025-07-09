@@ -1037,6 +1037,7 @@ function App() {
 
     const commonSettings = [
       { key: 'server_ip', label: 'Server IP', type: 'text' },
+      { key: 'custom_endpont', label: 'Custom Endpoint', type: 'text' },
       { key: 'dns', label: 'DNS Server', type: 'text' },
       { key: 'mtu', label: 'MTU', type: 'number' },
       { key: 'reset_time', label: 'Reset Time (hours)', type: 'number' },
