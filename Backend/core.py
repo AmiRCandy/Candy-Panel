@@ -1,5 +1,5 @@
 # core.py
-import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re
+import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , netifaces 
 from db import SQLite
 from datetime import datetime
 
@@ -52,7 +52,16 @@ class CandyPanel:
             if check:
                 raise CommandExecutionError(f"Unexpected error: {e}")
             return None
-
+    def _get_default_interface(self):
+        """Gets the default network interface."""
+        try:
+            gateways = netifaces.gateways()
+            return gateways['default'][netifaces.AF_INET][1]
+        except Exception:
+            result = self.run_command("ip route | grep default | awk '{print $5}'", check=False)
+            if result:
+                return result
+            return "eth0" 
     @staticmethod
     def load_traffic_db() -> dict:
         """
@@ -307,6 +316,8 @@ AllowedIPs = {client_ip}/32
         env = os.environ.copy()
         env["AP_PORT"] = '3446'
         wg_id = 0 # Default initial interface ID
+        default_interface = self._get_default_interface()
+        interface_name = f"wg{wg_id}"
         server_private_key_path = SERVER_PRIVATE_KEY_PATH.replace('X', str(wg_id))
         server_public_key_path = SERVER_PUBLIC_KEY_PATH.replace('X', str(wg_id))
         wg_conf_path = WG_CONF_PATH.replace('X', str(wg_id))
@@ -334,15 +345,8 @@ PrivateKey = {private_key}
 MTU = 1420
 DNS = 8.8.8.8
 
-PostUp = iptables -I INPUT -p udp --dport ${wg_port} -j ACCEPT
-PostUp = iptables -I FORWARD -i $eth0 -o $wg0 -j ACCEPT
-PostUp = iptables -I FORWARD -i $wg0 -j ACCEPT
-PostUp = iptables -t nat -A POSTROUTING -o $eth0 -j MASQUERADE
-
-PostDown = iptables -D INPUT -p udp --dport ${wg_port} -j ACCEPT
-PostDown = iptables -D FORWARD -i $eth0 -o $wg0 -j ACCEPT
-PostDown = iptables -D FORWARD -i $wg0 -j ACCEPT
-PostDown = iptables -t nat -D POSTROUTING -o $eth0 -j MASQUERADE
+PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
         """.strip()
 
         with open(wg_conf_path, "w") as f:
@@ -595,7 +599,7 @@ PersistentKeepalive = 25
 
         if self._interface_exists(interface_name):
             return False, f"Interface {interface_name} configuration file already exists."
-
+        default_interface = self._get_default_interface()
         private_key, public_key = self._generate_keypair()
         server_private_key_path = SERVER_PRIVATE_KEY_PATH.replace('X', str(new_wg_id))
         server_public_key_path = SERVER_PUBLIC_KEY_PATH.replace('X', str(new_wg_id))
@@ -611,15 +615,8 @@ ListenPort = {port}
 MTU = 1420
 DNS = 8.8.8.8
 
-PostUp = iptables -I INPUT -p udp --dport ${port} -j ACCEPT
-PostUp = iptables -I FORWARD -i $eth0 -o $wg{new_wg_id} -j ACCEPT
-PostUp = iptables -I FORWARD -i $wg{new_wg_id} -j ACCEPT
-PostUp = iptables -t nat -A POSTROUTING -o $eth0 -j MASQUERADE
-
-PostDown = iptables -D INPUT -p udp --dport ${port} -j ACCEPT
-PostDown = iptables -D FORWARD -i $eth0 -o $wg{new_wg_id} -j ACCEPT
-PostDown = iptables -D FORWARD -i $wg{new_wg_id} -j ACCEPT
-PostDown = iptables -t nat -D POSTROUTING -o $eth0 -j MASQUERADE
+PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
 """
         try:
             with open(path, "w") as f:
