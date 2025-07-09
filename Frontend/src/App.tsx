@@ -1009,10 +1009,12 @@ function App() {
                           >
                             <Edit className="w-4 h-4" />
                           </button>
-                          <button>
+                          <button
                             onClick={() => deleteClient(client.name)}
                             className="p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
                             title="Delete Client"
+                            >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
