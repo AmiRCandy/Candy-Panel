@@ -131,6 +131,7 @@ class SQLite:
             {'key': 'auto_backup', 'value': '1'},
             {'key': 'install', 'value': '1'},
             {'key': 'telegram_bot_pid', 'value': '0'},
+            {'key': 'ap_port', 'value': '3446'},
         ]
         for setting in default_settings:
             self.insert('settings', setting)
