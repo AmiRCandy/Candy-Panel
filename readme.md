@@ -19,13 +19,19 @@ A modern, beautiful web interface for managing WireGuard VPN servers with compre
 
 ## 🚀 Quick Start
 
-### 🚀 One command install
+### 🚀 One line command install
 
 ```bash
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Panel/main/install.sh)"
 ```
-- Panel Port : 3446
-- API Port : 3446
+- Panel Default Port : 3446
+- API Default Port : 3446
+
+### 🚀 One line command uninstall
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Panel/main/uninstall.sh)"
+```
 
 ### Prerequisites
 
