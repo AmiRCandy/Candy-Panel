@@ -226,7 +226,7 @@ clone_or_update_repo() {
         # Corrected: Create parent directory correctly if it doesn't exist
         sudo mkdir -p "$(dirname "$PROJECT_ROOT")"
 
-        sudo git clone "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
+        sudo git clone --branch dev.test --single-branch "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
         sudo chown -R "$LINUX_USER:$LINUX_USER" "$PROJECT_ROOT" || { print_warning "Could not change ownership of $PROJECT_ROOT to $LINUX_USER. Manual intervention might be needed for permissions."; }
         print_success "Repository cloned successfully."
     fi
