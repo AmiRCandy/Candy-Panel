@@ -7,7 +7,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
 # --- Configuration ---
-UNIFIED_API_URL = "http://127.0.0.1:3446" # Default Flask port for main.py
+UNIFIED_API_URL = F"http://127.0.0.1:{os.environ.get('AP_PORT',3446)}"
 
 API_ID = os.environ.get("TELEGRAM_API_ID")
 API_HASH = os.environ.get("TELEGRAM_API_HASH")
