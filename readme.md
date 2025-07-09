@@ -171,7 +171,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🗺️ Roadmap
 
-- [ ] Telegram bot integration for automated sales
+- [x] Telegram bot integration for automated sales
 - [ ] IPV6 Support
 - [ ] Advanced analytics and reporting
 - [ ] Docker containerization
