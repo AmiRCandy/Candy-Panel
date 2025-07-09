@@ -999,6 +999,7 @@ function App() {
       { key: 'dns', label: 'DNS Server', type: 'text' },
       { key: 'mtu', label: 'MTU', type: 'number' },
       { key: 'reset_time', label: 'Reset Time (hours)', type: 'number' },
+      { key: 'ap_port', label: 'API + Panel Port', type: 'number' },
       { key: 'auto_backup', label: 'Auto Backup', type: 'select', options: [{ value: '1', label: 'Enabled' }, { value: '0', label: 'Disabled' }] },
     ];
 
@@ -1220,13 +1221,43 @@ function App() {
               />
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">API ID</label>
+              <input
+                type="text"
+                value={settingsValues['telegram_bot_api_id'] || ''}
+                onChange={(e) => updateSetting('telegram_bot_api_id', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                placeholder="Your API ID"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">API HASH</label>
+              <input
+                type="text"
+                value={settingsValues['telegram_bot_api_hash'] || ''}
+                onChange={(e) => updateSetting('telegram_bot_api_hash', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                placeholder="Your API HASH"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Card Number</label>
+              <input
+                type="text"
+                value={settingsValues['admin_card_number'] || ''}
+                onChange={(e) => updateSetting('admin_card_numbers', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                placeholder="Your Card number for seller"
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">Prices (JSON)</label>
               <textarea
                 value={settingsValues['telegram_bot_prices'] || ''}
                 onChange={(e) => updateSetting('telegram_bot_prices', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                 rows={4}
-                placeholder='{"per_month":75000,"per_gb":4000}'
+                placeholder='{"1Month":75000,"1GB":4000}'
               />
               <p className="text-xs text-gray-500 mt-1">Enter as a valid JSON string, e.g., `"per_month":75000,"per_gb":4000`</p>
             </div>
