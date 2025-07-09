@@ -329,6 +329,7 @@ configure_frontend_api_url() {
 
     print_info "Writing frontend environment variable VITE_APP_API_URL to .env.production..."
     echo "export VITE_APP_API_URL=$frontend_api_url" | sudo tee "$FRONTEND_DIR/.env.production" > /dev/null || { print_error "Failed to write .env.production file. Check permissions."; exit 1; }
+    echo "export AP_PORT=$BACKEND_PORT" | sudo tee "$FRONTEND_DIR/.env.production" > /dev/null || { print_error "Failed to write .env.production file. Check permissions."; exit 1; }
     print_success ".env.production created/updated with VITE_APP_API_URL=$frontend_api_url"
     sudo chown "$LINUX_USER:$LINUX_USER" "$FRONTEND_DIR/.env.production" || { print_warning "Could not change ownership of .env.production. Manual intervention might be needed for permissions."; }
     sleep 1
