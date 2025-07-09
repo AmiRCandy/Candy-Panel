@@ -846,7 +846,7 @@ PersistentKeepalive = 25
 
     def _start_telegram_bot(self):
         """
-        Starts the telegram_bot.py script as a detached subprocess.
+        Starts the bot.py script as a detached subprocess.
         Stores its PID in the settings.
         """
         print("[*] Attempting to start Telegram bot...")
@@ -865,13 +865,13 @@ PersistentKeepalive = 25
                 print("[!] Telegram API Hash not configured. Cannot start bot.")
                 return False
 
-            bot_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'telegram_bot.py')
+            bot_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bot.py')
             
             # Set environment variables for the subprocess
             env = os.environ.copy()
             env["TELEGRAM_API_ID"] = api_id_setting['value']
             env["TELEGRAM_API_HASH"] = api_hash_setting['value']
-            # BOT_TOKEN is fetched by telegram_bot.py itself from DB, so no need to pass here.
+            # BOT_TOKEN is fetched by bot.py itself from DB, so no need to pass here.
 
             # Use subprocess.Popen to run in background, redirecting stdout/stderr to avoid blocking
             # and setting preexec_fn for detaching on Unix-like systems.
@@ -886,12 +886,25 @@ PersistentKeepalive = 25
             print(f"[+] Telegram bot started with PID: {process.pid}")
             return True
         except FileNotFoundError:
-            print(f"[!] Error: telegram_bot.py not found at {bot_script_path}. Cannot start bot.")
+            print(f"[!] Error: bot.py not found at {bot_script_path}. Cannot start bot.")
             return False
         except Exception as e:
             print(f"[!] Failed to start Telegram bot: {e}")
             return False
-
+    def _is_telegram_bot_running(self, pid: int) -> bool:
+        """
+        Checks if the Telegram bot process with the given PID is running.
+        """
+        if pid <= 0:
+            return False
+        try:
+            process = psutil.Process(pid)
+            return process.is_running() and "bot.py" in " ".join(process.cmdline())
+        except psutil.NoSuchProcess:
+            return False
+        except Exception as e:
+            print(f"Error checking Telegram bot status for PID {pid}: {e}")
+            return False
     def _stop_telegram_bot(self):
         """
         Stops the Telegram bot process.
@@ -911,7 +924,7 @@ PersistentKeepalive = 25
         try:
             process = psutil.Process(pid)
             cmdline = " ".join(process.cmdline()).lower()
-            if "telegram_bot.py" in cmdline:
+            if "bot.py" in cmdline:
                 process.terminate() # or process.kill() for a more forceful termination
                 process.wait(timeout=5) # Wait for process to terminate
                 print(f"[+] Telegram bot (PID: {pid}) stopped.")
