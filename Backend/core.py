@@ -1,7 +1,7 @@
 # core.py
-import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , netifaces 
+import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , netifaces
 from db import SQLite
-from datetime import datetime , timedelta 
+from datetime import datetime , timedelta
 
 # --- Configuration Paths (Consider making these configurable in a real app) ---
 SERVER_PUBLIC_KEY_PATH = "/etc/wireguard/server_public_wgX.key"
@@ -61,7 +61,7 @@ class CandyPanel:
             result = self.run_command("ip route | grep default | awk '{print $5}'", check=False)
             if result:
                 return result
-            return "eth0" 
+            return "eth0"
     @staticmethod
     def load_traffic_db() -> dict:
         """
@@ -160,7 +160,7 @@ class CandyPanel:
         print(f"[*] Reloading WireGuard interface wg{wg_id}...")
         # Ensure the interface is down before bringing it up to apply changes
         # Use '|| true' to prevent error if already down, allowing 'up' to proceed
-        self.run_command(f"sudo wg-quick down wg{wg_id} || true", check=False) 
+        self.run_command(f"sudo wg-quick down wg{wg_id} || true", check=False)
         self.run_command(f"sudo wg-quick up wg{wg_id}")
         print(f"[*] WireGuard interface wg{wg_id} reloaded.")
 
@@ -189,7 +189,7 @@ AllowedIPs = {client_ip}/32
         Removes a client peer entry from the WireGuard configuration file.
         """
         config_path = WG_CONF_PATH.replace('X', str(wg_id))
-        
+
         if not os.path.exists(config_path):
             print(f"[!] WireGuard config file {config_path} not found. Cannot remove peer from config.")
             return # Cannot remove if file doesn't exist
@@ -250,23 +250,51 @@ AllowedIPs = {client_ip}/32
         """
         traffic_data = {}
         try:
+            # Use 'dump' command to get machine-readable output
             result = subprocess.run(['wg', 'show', f"wg{wg_id}", 'dump'], capture_output=True, text=True, check=True)
-            # The 'dump' command provides a parsable output:
-            # interface  public_key  private_key  listen_port  fwmark  peer  public_key  preshared_key  endpoint  allowed_ips  latest_handshake  transfer_rx  transfer_tx  persistent_keepalive  protocol_version
-            # wg0        ...         ...          ...          ...     peer    PUBKEY_CLIENT1 ... 10.0.0.2/32  ...               RX_BYTES TX_BYTES ...
-            # wg0        ...         ...          ...          ...     peer    PUBKEY_CLIENT2 ... 10.0.0.3/32  ...               RX_BYTES TX_BYTES ...
+            output_lines = result.stdout.strip().splitlines()
 
-            # Split by lines and process only peer lines
-            for line in result.stdout.splitlines():
-                parts = line.split('\t')
-                if len(parts) >= 12 and parts[0].strip() == f"wg{wg_id}": # Ensure it's a peer line for this interface
-                    try:
-                        pubkey = parts[5].strip() # Client public key
-                        rx = int(parts[10]) # Transfer RX bytes
-                        tx = int(parts[11]) # Transfer TX bytes
-                        traffic_data[pubkey] = {'rx': rx, 'tx': tx}
-                    except (ValueError, IndexError) as e:
-                        print(f"Warning: Could not parse wg dump line: {line.strip()}. Error: {e}")
+            # The first line is for the interface, subsequent lines are for peers
+            # The format seems to be space-separated in your case, not tab-separated.
+            # Use split() without args to handle multiple spaces as one delimiter.
+            # Expected format:
+            # wg0	server_pub_key	server_priv_key	listen_port	fwmark	peer_pub_key	preshared_key	endpoint	allowed_ips	latest_handshake	transfer_rx	transfer_tx	persistent_keepalive	protocol_version
+
+            for line in output_lines:
+                # Skip interface line and empty lines
+                if not line or line.startswith(f"wg{wg_id}"): # Still check for wg_id prefix if it eventually returns
+                    # If the interface line also contains public key, it's typically the first field.
+                    # Your sample output starts with public key directly for interface line, and then peer line.
+                    # Let's refine parsing based on your exact 'dump' output.
+                    #
+                    # Based on your exact dump output:
+                    # Line 1: Server's Private Key, Server's Public Key, Listen Port, Off
+                    # KIPjLgU/l7riYynf2m+A72lVib2NgXCnUtYsIrRjw0A=      2ne2Jz8nfcug3P5kK87P/fzpaD6tVumcubJmUJLlMzU=      51821      off
+                    #
+                    # Line 2 (Peer): Peer Public Key, (none), Endpoint, AllowedIPs, Handshake, RX, TX, Off
+                    # zZxZPV9JKmtBT1bGw1wcIoe24Ue2DIvQunWHR+Mc7gI=      (none)  37.129.186.81:32259      156.66.66.2/32      1752159098        3350240 47470388        off
+
+                    # We need to distinguish between the interface line and peer lines.
+                    # A robust way is to check the number of parts. Peer lines have more.
+                    parts = line.strip().split() # Split by any whitespace
+
+                    # Check if it's likely a peer line (based on number of fields in your provided dump)
+                    if len(parts) >= 8: # A peer line should have at least public_key, (none), endpoint, allowed_ips, handshake, rx, tx, off
+                        try:
+                            # From your provided sample dump:
+                            # Peer Public Key is parts[0]
+                            pubkey = parts[0] # The public key for the peer
+
+                            # transfer_rx is parts[5]
+                            rx = int(parts[5])
+
+                            # transfer_tx is parts[6]
+                            tx = int(parts[6])
+
+                            traffic_data[pubkey] = {'rx': rx, 'tx': tx}
+                            # print(f"DEBUG: Parsed traffic for {pubkey}: RX={rx}, TX={tx}") # Uncomment for debugging
+                        except (ValueError, IndexError) as e:
+                            print(f"Warning: Could not parse wg dump line (peer format mismatch): {line.strip()}. Error: {e}")
         except subprocess.CalledProcessError as e:
             print(f"Warning: Failed to run `wg show wg{wg_id} dump`. Error: {e.stderr.strip()}")
         except Exception as e:
@@ -293,6 +321,8 @@ AllowedIPs = {client_ip}/32
             self.run_command("sudo apt install -y wireguard qrencode")
         except Exception as e:
             return False, f"Failed to install WireGuard dependencies: {e}"
+
+        # --- Add UFW Installation and Configuration ---
         print("[+] Installing and configuring UFW...")
         try:
             self.run_command("sudo apt install -y ufw")
@@ -323,11 +353,13 @@ AllowedIPs = {client_ip}/32
             print("[+] IP forwarding enabled successfully.")
         except Exception as e:
             return False, f"Failed to enable IP forwarding: {e}"
+
+
         print("[+] Creating /etc/wireguard if not exists...")
         os.makedirs("/etc/wireguard", exist_ok=True)
         os.chmod("/etc/wireguard", 0o700)
         env = os.environ.copy()
-        env["AP_PORT"] = '3446'
+        env["AP_PORT"] = '3446' # Ensure this is set for `bot.py` and `main.py`
         wg_id = 0 # Default initial interface ID
         default_interface = self._get_default_interface()
         interface_name = f"wg{wg_id}"
@@ -472,7 +504,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         used_ips = self._get_used_ips(wg_id)
         network_address_prefix = interface_wg['address_range'].rsplit('.', 1)[0]
         next_ip_host_part = 2
-        
+
         # Get IPs already assigned to clients in the DB for the current interface
         existing_client_ips = {c['address'] for c in self.db.select('clients', where={'wg': wg_id})}
 
@@ -535,7 +567,7 @@ PersistentKeepalive = 25
             return False, f"Client '{client_name}' not found."
 
         wg_id = client['wg']
-        
+
         try:
             self._remove_peer_from_config(wg_id, client_name)
         except CommandExecutionError as e:
@@ -582,7 +614,7 @@ PersistentKeepalive = 25
             return False, f"Client '{name}' not found."
 
         update_data = {}
-        
+
         if expire is not None:
             update_data['expires'] = expire
         if traffic is not None:
@@ -605,7 +637,7 @@ PersistentKeepalive = 25
                     self._remove_peer_from_config(wg_id, name)
                 except CommandExecutionError as e:
                     return False, str(e)
-        
+
         # Only update if there's actual data to change
         if update_data:
             self.db.update('clients', update_data, {'name': name})
@@ -735,7 +767,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                 else: # Changing to Inactive
                     self.run_command(f"sudo systemctl stop wg-quick@{name}")
                     print(f"[+] Interface {name} stopped.")
-            
+
             # Perform DB update only if there's data to update
             if update_data:
                 self.db.update('interfaces', update_data, {'wg': wg_id})
@@ -943,7 +975,7 @@ PersistentKeepalive = 25
                     return False
 
                 bot_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bot.py')
-                
+
                 env = os.environ.copy()
                 env["TELEGRAM_API_ID"] = api_id_setting['value']
                 env["TELEGRAM_API_HASH"] = api_hash_setting['value']
@@ -971,7 +1003,7 @@ PersistentKeepalive = 25
                 print("[*] Telegram bot is already stopped.")
                 self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
                 return True # Already in desired state
-            
+
             print("[*] Attempting to stop Telegram bot...")
             try:
                 process = psutil.Process(current_pid)
@@ -1005,13 +1037,13 @@ PersistentKeepalive = 25
         This replaces the old traffic.json logic.
         """
         print("[*] Calculating and updating client traffic statistics...")
-        
+
         # Get current traffic from all interfaces
         current_wg_traffic = {}
         for interface_row in self.db.select('interfaces'):
             wg_id = interface_row['wg']
             current_wg_traffic.update(self._get_current_wg_peer_traffic(wg_id))
-        
+
         # Total bandwidth consumed by all clients in this cycle
         total_bandwidth_consumed_this_cycle = 0
 
@@ -1028,7 +1060,7 @@ PersistentKeepalive = 25
             try:
                 # Parse existing used_trafic data (which now includes last_wg_rx/tx)
                 used_traffic_data = json.loads(client.get('used_trafic', '{"download":0,"upload":0,"last_wg_rx":0,"last_wg_tx":0}'))
-                
+
                 cumulative_download = used_traffic_data.get('download', 0)
                 cumulative_upload = used_traffic_data.get('upload', 0)
                 last_wg_rx = used_traffic_data.get('last_wg_rx', 0)
@@ -1040,12 +1072,12 @@ PersistentKeepalive = 25
                 if delta_rx < 0:
                     print(f"[*] Detected RX counter reset for client '{client_name}'. Adding current RX ({current_rx} bytes) as delta.")
                     delta_rx = current_rx
-                
+
                 delta_tx = current_tx - last_wg_tx
                 if delta_tx < 0:
                     print(f"[*] Detected TX counter reset for client '{client_name}'. Adding current TX ({current_tx} bytes) as delta.")
                     delta_tx = current_tx
-                
+
                 delta_rx = max(0, delta_rx) # Ensure non-negative
                 delta_tx = max(0, delta_tx) # Ensure non-negative
 
@@ -1062,7 +1094,7 @@ PersistentKeepalive = 25
                 }
 
                 self.db.update('clients', {'used_trafic': json.dumps(updated_used_traffic)}, {'name': client_name})
-                
+
                 total_bandwidth_consumed_this_cycle += (delta_rx + delta_tx)
 
             except (json.JSONDecodeError, ValueError, TypeError) as e:
