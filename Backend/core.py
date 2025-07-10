@@ -918,14 +918,15 @@ PersistentKeepalive = 25
                 env = os.environ.copy()
                 env["TELEGRAM_API_ID"] = api_id_setting['value']
                 env["TELEGRAM_API_HASH"] = api_hash_setting['value']
-
-                process = subprocess.Popen(
-                    ['python3', bot_script_path],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    preexec_fn=os.setsid,
-                    env=env
-                )
+                log_file_path = "/var/log/candy-telegram-bot.log" # Or another suitable path
+                with open(log_file_path, "a") as log_file: # "a" for append mode
+                    process = subprocess.Popen(
+                        ['python3', bot_script_path],
+                        stdout=log_file,  # Redirect stdout to file
+                        stderr=log_file,  # Redirect stderr to file
+                        preexec_fn=os.setsid,
+                        env=env
+                    )
                 self.db.update('settings', {'value': str(process.pid)}, {'key': 'telegram_bot_pid'})
                 print(f"[+] Telegram bot started with PID: {process.pid}")
                 return True
