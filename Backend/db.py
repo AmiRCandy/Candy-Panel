@@ -57,7 +57,7 @@ class SQLite:
                     `expires` TEXT NOT NULL,
                     `note` TEXT DEFAULT '',
                     `traffic` TEXT NOT NULL, 
-                    `used_trafic` TEXT NOT NULL DEFAULT '{"download":0,"upload":0}',
+                    `used_trafic` TEXT NOT NULL DEFAULT '{"download":0,"upload":0, "last_wg_rx":0, "last_wg_tx":0}',
                     `connected_now` BOOLEAN NOT NULL DEFAULT 0,
                     `status` BOOLEAN NOT NULL DEFAULT 1
                 );
