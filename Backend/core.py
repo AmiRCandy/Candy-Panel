@@ -293,7 +293,36 @@ AllowedIPs = {client_ip}/32
             self.run_command("sudo apt install -y wireguard qrencode")
         except Exception as e:
             return False, f"Failed to install WireGuard dependencies: {e}"
+        print("[+] Installing and configuring UFW...")
+        try:
+            self.run_command("sudo apt install -y ufw")
+            self.run_command("sudo ufw default deny incoming")
+            self.run_command("sudo ufw default allow outgoing")
+            self.run_command(f"sudo ufw allow {wg_port}/udp")
+            self.run_command("sudo ufw allow ssh")
+            ap_port = os.environ.get('AP_PORT', '3446')
+            self.run_command(f"sudo ufw allow {ap_port}/tcp")
+            self.run_command("sudo ufw --force enable")
+            print("[+] UFW configured successfully.")
+        except Exception as e:
+            return False, f"Failed to configure UFW: {e}"
 
+        # --- Add IP Forwarding Configuration ---
+        print("[+] Enabling IP forwarding...")
+        try:
+            self.run_command("sudo sysctl -w net.ipv4.ip_forward=1")
+            self.run_command("sudo sysctl -w net.ipv6.conf.all.forwarding=1")
+            sysctl_conf_path = "/etc/sysctl.conf"
+            with open(sysctl_conf_path, 'r+') as f:
+                content = f.read()
+                if 'net.ipv4.ip_forward = 1' not in content:
+                    f.write("\nnet.ipv4.ip_forward = 1\n")
+                if 'net.ipv6.conf.all.forwarding = 1' not in content:
+                    f.write("net.ipv6.conf.all.forwarding = 1\n")
+            self.run_command("sudo sysctl -p")
+            print("[+] IP forwarding enabled successfully.")
+        except Exception as e:
+            return False, f"Failed to enable IP forwarding: {e}"
         print("[+] Creating /etc/wireguard if not exists...")
         os.makedirs("/etc/wireguard", exist_ok=True)
         os.chmod("/etc/wireguard", 0o700)
