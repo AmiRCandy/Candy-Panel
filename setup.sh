@@ -103,7 +103,7 @@ check_prerequisites() {
 
         if [ $? -ne 0 ]; then
             print_error "Failed to install some required packages. Please check the output and install them manually."
-            exit 1
+            #exit 1
         else
             print_success "Missing packages installed successfully."
         fi
