@@ -255,6 +255,18 @@ async def manage_resources():
                 value = data.get('value')
                 if not all([key, value is not None]): # Value can be an empty string or 0, so check explicitly
                     return error_response("Missing key or value for setting update", 400)
+                if key == 'telegram_bot_status':
+                    if value == '1': # '1' means ON
+                        bot_control_success = await asyncio.to_thread(candy_panel._manage_telegram_bot_process, 'start')
+                        if not bot_control_success:
+                            # Log the failure, but return success for setting update if DB was successful
+                            print(f"Warning: Failed to start bot immediately after setting update.")
+                            return success_response(f"{message} (Bot start attempted, but failed.)")
+                    else: # '0' means OFF
+                        bot_control_success = await asyncio.to_thread(candy_panel._manage_telegram_bot_process, 'stop')
+                        if not bot_control_success:
+                            print(f"Warning: Failed to stop bot immediately after setting update.")
+                            return success_response(f"{message} (Bot stop attempted, but failed.)")
                 success, message = await asyncio.to_thread(candy_panel._change_settings, key, value)
                 if not success:
                     return error_response(message, 400)
