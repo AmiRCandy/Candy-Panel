@@ -667,7 +667,15 @@ PersistentKeepalive = 25
 
         interface_name = f"wg{new_wg_id}"
         path = self._get_interface_path(interface_name)
-
+        print("[+] Installing and configuring UFW...")
+        try:
+            self.run_command("sudo ufw default deny incoming")
+            self.run_command("sudo ufw default allow outgoing")
+            self.run_command(f"sudo ufw allow {port}/udp")
+            self.run_command("sudo ufw --force enable")
+            print("[+] UFW configured successfully.")
+        except Exception as e:
+            return False, f"Failed to configure UFW: {e}"
         if self._interface_exists(interface_name):
             return False, f"Interface {interface_name} configuration file already exists."
         default_interface = self._get_default_interface()
