@@ -121,13 +121,17 @@ function App() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      loadData(); // Initial load
+      if (activeTab === 'dashboard') {
+        loadData(); // Initial load
+      }
       const interval = setInterval(() => {
-        loadData(false); // Subsequent loads, don't show full loading state on failure
+        if (activeTab === 'dashboard') {
+          loadData(false); // Subsequent loads, don't show full loading state on failure
+        }
       }, 5000); // Fetch every 5 seconds
       return () => clearInterval(interval); // Clean up on unmount
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, activeTab]);
 
   const checkAuth = async () => {
     try {
@@ -240,12 +244,12 @@ function App() {
     e.preventDefault();
     try {
       setLoading(true);
-
+      const trafficInBytes = (parseFloat(clientTraffic) * 1024 * 1024).toString();
       if (editingClient) {
         const response = await apiClient.updateClient({
           name: editingClient.name,
           expires: clientExpires,
-          traffic: clientTraffic,
+          traffic: trafficInBytes,
           note: clientNote,
           status: clientStatus,
         });
@@ -256,7 +260,7 @@ function App() {
         const response = await apiClient.createClient({
           name: clientName,
           expires: clientExpires,
-          traffic: clientTraffic,
+          traffic: trafficInBytes,
           wg_id: parseInt(clientWgId),
           note: clientNote,
         });
@@ -870,7 +874,7 @@ function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Traffic Limit (bytes)</label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Traffic Limit (MB)</label>
                   <input
                     type="number"
                     value={clientTraffic}
