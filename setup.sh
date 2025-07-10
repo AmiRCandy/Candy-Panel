@@ -602,7 +602,7 @@ run_update() {
     print_info "--- Updating Backend Dependencies ---"
     cd "$BACKEND_DIR" || { print_error "Backend directory not found: $BACKEND_DIR"; exit 1; }
     source venv/bin/activate || { print_error "Failed to activate virtual environment. Cannot update backend dependencies."; exit 1; }
-    pip install -r requirements.txt || { print_warning "Failed to install Python dependencies from requirements.txt. Attempting direct install..."; pip install pyrogram flask[async] requests flask_cors psutil netifaces || { print_error "Failed to install Python dependencies directly."; exit 1; }; }
+    pip install -r requirements.txt || { print_warning "Failed to install Python dependencies from requirements.txt. Attempting direct install..."; pip install pyrogram flask[async] requests flask_cors psutil netifaces httpx || { print_error "Failed to install Python dependencies directly."; exit 1; }; }
     deactivate
     print_success "Backend dependencies updated."
     sleep 1
