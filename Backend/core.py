@@ -1168,8 +1168,10 @@ PersistentKeepalive = 25
 
         # --- Client Expiration and Traffic Limit Enforcement (Disable, not Delete) ---
         current_time = datetime.now()
-        active_clients = self.db.select('clients', where={'status': True}) # Only check active clients
-        for client in active_clients:
+        # FIX: Fetch all clients to disable into a list first, BEFORE iterating and updating
+        clients_to_disable = []
+        active_clients = self.db.select('clients', where={'status': True})
+        for client in active_clients: # Iterating over fetched results
             should_disable = False
             disable_reason = ""
 
@@ -1196,9 +1198,12 @@ PersistentKeepalive = 25
                     print(f"[!] Warning: Invalid traffic data for client '{client['name']}'. Skipping traffic limit check. Error: {e}")
 
             if should_disable:
-                print(f"[!] Client '{client['name']}' {disable_reason}. Disabling...")
-                self._disable_client(client['name']) # Disable the client
+                clients_to_disable.append(client['name']) # Collect names to disable
 
+        # Now, iterate over the collected names and perform the database updates
+        for client_name_to_disable in clients_to_disable:
+            print(f"[!] Client '{client_name_to_disable}' needs disabling. Disabling...")
+            self._disable_client(client_name_to_disable)
         # --- Update Traffic Statistics ---
         self._calculate_and_update_traffic()
 
