@@ -1,6 +1,7 @@
 # db.py
 import sqlite3
 import time
+import json , os
 from datetime import datetime
 
 class SQLite:
@@ -8,7 +9,8 @@ class SQLite:
         """
         Initializes the SQLite database connection.
         """
-        self.db_path = db_path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.db_path = os.path.join(script_dir, db_path)
         self.conn = None
         self.cursor = None
         self._connect()
@@ -19,11 +21,10 @@ class SQLite:
         Establishes a connection to the SQLite database.
         """
         try:
-            # timeout for busy database, check_same_thread=False for multi-threading if needed
             self.conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
-            self.conn.row_factory = sqlite3.Row # Allows accessing columns by name
+            self.conn.row_factory = sqlite3.Row
             self.cursor = self.conn.cursor()
-            self.cursor.execute("PRAGMA journal_mode=WAL;") # Write-Ahead Logging for better concurrency
+            self.cursor.execute("PRAGMA journal_mode=WAL;")
             self.conn.commit()
         except sqlite3.Error as e:
             print(f"Database connection error: {e}")
@@ -32,6 +33,7 @@ class SQLite:
     def _initialize_tables(self):
         """
         Creates necessary tables if they don't exist and inserts default settings.
+        Includes tables for CandyPanel and Telegram Bot.
         """
         try:
             self.cursor.execute("""
@@ -46,16 +48,16 @@ class SQLite:
             """)
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `clients` (
-                    `name` TEXT NOT NULL UNIQUE, -- Name should be unique for clients
+                    `name` TEXT NOT NULL UNIQUE, 
                     `wg` INTEGER NOT NULL,
-                    `public_key` TEXT NOT NULL UNIQUE, -- Public key should be unique
+                    `public_key` TEXT NOT NULL UNIQUE, 
                     `private_key` TEXT NOT NULL,
-                    `address` TEXT NOT NULL UNIQUE, -- Client IP address should be unique
+                    `address` TEXT NOT NULL UNIQUE, 
                     `created_at` TEXT NOT NULL,
                     `expires` TEXT NOT NULL,
                     `note` TEXT DEFAULT '',
-                    `traffic` TEXT NOT NULL, -- Stored as string, but should be convertible to int (bytes)
-                    `used_trafic` TEXT NOT NULL DEFAULT '{"download":0,"upload":0}', -- Corrected typo: NOT NUL -> NOT NULL
+                    `traffic` TEXT NOT NULL, 
+                    `used_trafic` TEXT NOT NULL DEFAULT '{"download":0,"upload":0, "last_wg_rx":0, "last_wg_tx":0}',
                     `connected_now` BOOLEAN NOT NULL DEFAULT 0,
                     `status` BOOLEAN NOT NULL DEFAULT 1
                 );
@@ -66,9 +68,36 @@ class SQLite:
                     `value` TEXT NOT NULL
                 );
             """)
+            # --- Telegram Bot Tables ---
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS `users` (
+                    `telegram_id` INTEGER PRIMARY KEY,
+                    `candy_client_name` TEXT UNIQUE, 
+                    `traffic_bought_gb` REAL DEFAULT 0,
+                    `time_bought_days` INTEGER DEFAULT 0,
+                    `status` TEXT DEFAULT 'active',
+                    `is_admin` BOOLEAN DEFAULT 0,
+                    `created_at` TEXT NOT NULL
+                );
+            """)
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS `transactions` (
+                    `order_id` TEXT PRIMARY KEY,
+                    `telegram_id` INTEGER NOT NULL,
+                    `amount` REAL NOT NULL, 
+                    `card_number_sent` TEXT,
+                    `status` TEXT DEFAULT 'pending', 
+                    `requested_at` TEXT NOT NULL,
+                    `approved_at` TEXT,
+                    `admin_note` TEXT,
+                    `purchase_type` TEXT, 
+                    `quantity` REAL, 
+                    `time_quantity` REAL DEFAULT 0,
+                    `traffic_quantity` REAL DEFAULT 0,
+                    FOREIGN KEY (`telegram_id`) REFERENCES `users`(`telegram_id`)
+                );
+            """)
             self.conn.commit()
-
-            # Insert default settings only if the settings table is empty
             if self.count('settings') == 0:
                 self._insert_default_settings()
 
@@ -79,28 +108,32 @@ class SQLite:
     def _insert_default_settings(self):
         """
         Inserts initial default settings into the 'settings' table.
+        Includes settings for CandyPanel and Telegram Bot.
         """
         default_settings = [
             {'key': 'server_ip', 'value': '192.168.1.100'},
+            {'key': 'custom_endpont', 'value': '192.168.1.100'},
             {'key': 'session_token', 'value': 'NONE'},
             {'key': 'dns', 'value': '8.8.8.8'},
-            # WARNING: Admin password stored in plaintext. Hash this in a real application!
             {'key': 'admin', 'value': '{"user":"admin","password":"admin"}'},
-            {'key': 'status', 'value': '1'}, # Server status (e.g., active/inactive)
+            {'key': 'status', 'value': '1'},
             {'key': 'alert', 'value': '["Welcome To Candy Panel - by AmiRCandy"]'},
-            {'key': 'reset_time', 'value': '0'}, # Time in hours for interface reset (0 for disabled)
-            {'key': 'mtu', 'value': '1420'}, # Default MTU value
-            {'key': 'bandwidth', 'value': '0'}, # Total bandwidth consumed by all clients (bytes)
-            {'key': 'uptime', 'value': '0'}, # Server uptime in seconds
+            {'key': 'reset_time', 'value': '0'},
+            {'key': 'mtu', 'value': '1420'}, 
+            {'key': 'bandwidth', 'value': '0'},
+            {'key': 'uptime', 'value': '0'},
             {'key': 'telegram_bot_status', 'value': '0'},
             {'key': 'telegram_bot_admin_id', 'value': '0'},
-            {'key': 'telegram_bot_token', 'value': '0'},
-            # Example of JSON string for prices
-            {'key': 'telegram_bot_prices', 'value': '{"per_month":75000,"per_gb":4000}'},
-            # Corrected: Valid JSON string for API tokens dictionary
-            {'key': 'api_tokens', 'value': '{}'}, # Initialize as empty JSON object
-            {'key': 'auto_backup', 'value': '1'}, # 1 for enabled, 0 for disabled
-            {'key': 'install', 'value': '0'}, # 1 for enabled, 0 for disabled
+            {'key': 'telegram_bot_token', 'value': 'YOUR_TELEGRAM_BOT_TOKEN'}, 
+            {'key': 'telegram_api_hash', 'value': 'YOUR_TELEGRAM_API_HASH'}, 
+            {'key': 'telegram_api_id', 'value': 'YOUR_TELEGRAM_API_ID'}, 
+            {'key': 'admin_card_number', 'value': 'YOUR_ADMIN_CARD_NUMBER'}, 
+            {'key': 'prices', 'value': '{"1GB": 4000, "1Month": 75000}'}, 
+            {'key': 'api_tokens', 'value': '{}'},
+            {'key': 'auto_backup', 'value': '1'},
+            {'key': 'install', 'value': '0'},
+            {'key': 'telegram_bot_pid', 'value': '0'},
+            {'key': 'ap_port', 'value': '3446'},
         ]
         for setting in default_settings:
             self.insert('settings', setting)
@@ -121,11 +154,11 @@ class SQLite:
             else:
                 self.conn.commit()
                 if 'INSERT' in query.upper():
-                    return self.cursor.lastrowid # Return the ID of the last inserted row
-                return self.cursor.rowcount # Return number of rows affected by UPDATE/DELETE
+                    return self.cursor.lastrowid
+                return self.cursor.rowcount
         except sqlite3.Error as e:
             print(f"Database query failed: {e}\nQuery: {query}\nParams: {params}")
-            raise # Re-raise the exception after logging
+            raise 
 
     def select(self, table: str, columns: str | list[str] = '*', where: dict = None) -> list[dict]:
         """
@@ -186,7 +219,6 @@ class SQLite:
         set_clause = ', '.join(f"`{k}`=?" for k in data)
         where_clause = ' AND '.join(f"`{k}`=?" for k in where)
         query = f"UPDATE `{table}` SET {set_clause} WHERE {where_clause}"
-        # Concatenate values for SET clause and WHERE clause
         return self._execute_query(query, tuple(data.values()) + tuple(where.values()))
 
     def delete(self, table: str, where: dict):
@@ -206,3 +238,4 @@ class SQLite:
             self.conn.close()
             self.conn = None
             self.cursor = None
+

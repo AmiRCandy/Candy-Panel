@@ -1,7 +1,7 @@
 # core.py
-import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re
+import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , netifaces
 from db import SQLite
-from datetime import datetime
+from datetime import datetime , timedelta
 
 # --- Configuration Paths (Consider making these configurable in a real app) ---
 SERVER_PUBLIC_KEY_PATH = "/etc/wireguard/server_public_wgX.key"
@@ -52,7 +52,16 @@ class CandyPanel:
             if check:
                 raise CommandExecutionError(f"Unexpected error: {e}")
             return None
-
+    def _get_default_interface(self):
+        """Gets the default network interface."""
+        try:
+            gateways = netifaces.gateways()
+            return gateways['default'][netifaces.AF_INET][1]
+        except Exception:
+            result = self.run_command("ip route | grep default | awk '{print $5}'", check=False)
+            if result:
+                return result
+            return "eth0"
     @staticmethod
     def load_traffic_db() -> dict:
         """
@@ -151,7 +160,7 @@ class CandyPanel:
         print(f"[*] Reloading WireGuard interface wg{wg_id}...")
         # Ensure the interface is down before bringing it up to apply changes
         # Use '|| true' to prevent error if already down, allowing 'up' to proceed
-        self.run_command(f"sudo wg-quick down wg{wg_id} || true", check=False) 
+        self.run_command(f"sudo wg-quick down wg{wg_id} || true", check=False)
         self.run_command(f"sudo wg-quick up wg{wg_id}")
         print(f"[*] WireGuard interface wg{wg_id} reloaded.")
 
@@ -180,7 +189,7 @@ AllowedIPs = {client_ip}/32
         Removes a client peer entry from the WireGuard configuration file.
         """
         config_path = WG_CONF_PATH.replace('X', str(wg_id))
-        
+
         if not os.path.exists(config_path):
             print(f"[!] WireGuard config file {config_path} not found. Cannot remove peer from config.")
             return # Cannot remove if file doesn't exist
@@ -233,52 +242,64 @@ AllowedIPs = {client_ip}/32
             raise CommandExecutionError(f"Error removing client '{client_name}' from WireGuard configuration: {e}")
 
 
-    def _get_current_traffic(self) -> dict:
+    def _get_current_wg_peer_traffic(self, wg_id: int) -> dict:
         """
-        Retrieves current traffic statistics for all WireGuard peers across all interfaces.
-        Returns a dictionary: {wg_id: {pubkey: {ip: str, rx: int, tx: int}}}
+        Retrieves current traffic statistics (rx, tx) for all WireGuard peers
+        on a specific interface from 'wg show'.
+        Returns a dictionary: {public_key: {'ip': str, 'rx': int, 'tx': int}}
         """
-        traffic = {}
-        for interface_row in self.db.select('interfaces'):
-            wg_id = interface_row['wg']
-            result = subprocess.run(['wg', 'show', f"wg{wg_id}"], capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"Warning: Failed to run `wg show wg{wg_id}`. Error: {result.stderr.strip()}")
-                continue # Skip this interface if command fails
+        traffic_data = {}
+        try:
+            # Use 'dump' command to get machine-readable output
+            result = subprocess.run(['wg', 'show', f"wg{wg_id}", 'dump'], capture_output=True, text=True, check=True)
+            output_lines = result.stdout.strip().splitlines()
 
-            output = result.stdout
-            # Split output by 'peer:' to process each peer block
-            peers_blocks = output.split('peer: ')[1:]
+            # The first line is for the interface, subsequent lines are for peers
+            # The format seems to be space-separated in your case, not tab-separated.
+            # Use split() without args to handle multiple spaces as one delimiter.
+            # Expected format:
+            # wg0	server_pub_key	server_priv_key	listen_port	fwmark	peer_pub_key	preshared_key	endpoint	allowed_ips	latest_handshake	transfer_rx	transfer_tx	persistent_keepalive	protocol_version
 
-            traffic[wg_id] = {}
-            for peer_block in peers_blocks:
-                lines = peer_block.strip().splitlines()
-                pubkey = lines[0].strip()
+            for line in output_lines:
+                # Skip interface line and empty lines
+                if not line or line.startswith(f"wg{wg_id}"): # Still check for wg_id prefix if it eventually returns
+                    # If the interface line also contains public key, it's typically the first field.
+                    # Your sample output starts with public key directly for interface line, and then peer line.
+                    # Let's refine parsing based on your exact 'dump' output.
+                    #
+                    # Based on your exact dump output:
+                    # Line 1: Server's Private Key, Server's Public Key, Listen Port, Off
+                    # KIPjLgU/l7riYynf2m+A72lVib2NgXCnUtYsIrRjw0A=      2ne2Jz8nfcug3P5kK87P/fzpaD6tVumcubJmUJLlMzU=      51821      off
+                    #
+                    # Line 2 (Peer): Peer Public Key, (none), Endpoint, AllowedIPs, Handshake, RX, TX, Off
+                    # zZxZPV9JKmtBT1bGw1wcIoe24Ue2DIvQunWHR+Mc7gI=      (none)  37.129.186.81:32259      156.66.66.2/32      1752159098        3350240 47470388        off
 
-                # Extract AllowedIPs
-                allowed_line = next((line for line in lines if 'allowed ips:' in line.lower()), None)
-                ip = 'unknown'
-                if allowed_line:
-                    match = re.search(r'allowed ips:\s*(\S+)', allowed_line, re.IGNORECASE)
-                    if match:
-                        ip = match.group(1).split('/')[0] # Get just the IP, not the /32
+                    # We need to distinguish between the interface line and peer lines.
+                    # A robust way is to check the number of parts. Peer lines have more.
+                    parts = line.strip().split() # Split by any whitespace
 
-                # Extract Transfer (rx/tx)
-                transfer_line = next((line for line in lines if 'transfer:' in line.lower()), None)
-                rx, tx = 0, 0
-                if transfer_line:
-                    tx_rx_matches = re.findall(r'(\d+)\sbytes', transfer_line)
-                    if len(tx_rx_matches) >= 1:
-                        rx = int(tx_rx_matches[0])
-                    if len(tx_rx_matches) >= 2:
-                        tx = int(tx_rx_matches[1])
+                    # Check if it's likely a peer line (based on number of fields in your provided dump)
+                    if len(parts) >= 8: # A peer line should have at least public_key, (none), endpoint, allowed_ips, handshake, rx, tx, off
+                        try:
+                            # From your provided sample dump:
+                            # Peer Public Key is parts[0]
+                            pubkey = parts[0] # The public key for the peer
 
-                traffic[wg_id][pubkey] = {
-                    'ip': ip,
-                    'rx': rx,
-                    'tx': tx
-                }
-        return traffic
+                            # transfer_rx is parts[5]
+                            rx = int(parts[5])
+
+                            # transfer_tx is parts[6]
+                            tx = int(parts[6])
+
+                            traffic_data[pubkey] = {'rx': rx, 'tx': tx}
+                            # print(f"DEBUG: Parsed traffic for {pubkey}: RX={rx}, TX={tx}") # Uncomment for debugging
+                        except (ValueError, IndexError) as e:
+                            print(f"Warning: Could not parse wg dump line (peer format mismatch): {line.strip()}. Error: {e}")
+        except subprocess.CalledProcessError as e:
+            print(f"Warning: Failed to run `wg show wg{wg_id} dump`. Error: {e.stderr.strip()}")
+        except Exception as e:
+            print(f"An unexpected error occurred while getting traffic for wg{wg_id}: {e}")
+        return traffic_data
 
     def _install_candy_panel(self, server_ip: str,
                              wg_port: str,
@@ -301,11 +322,47 @@ AllowedIPs = {client_ip}/32
         except Exception as e:
             return False, f"Failed to install WireGuard dependencies: {e}"
 
+        # --- Add UFW Installation and Configuration ---
+        print("[+] Installing and configuring UFW...")
+        try:
+            self.run_command("sudo apt install -y ufw")
+            self.run_command("sudo ufw default deny incoming")
+            self.run_command("sudo ufw default allow outgoing")
+            self.run_command(f"sudo ufw allow {wg_port}/udp")
+            self.run_command("sudo ufw allow ssh")
+            ap_port = os.environ.get('AP_PORT', '3446')
+            self.run_command(f"sudo ufw allow {ap_port}/tcp")
+            self.run_command("sudo ufw --force enable")
+            print("[+] UFW configured successfully.")
+        except Exception as e:
+            return False, f"Failed to configure UFW: {e}"
+
+        # --- Add IP Forwarding Configuration ---
+        print("[+] Enabling IP forwarding...")
+        try:
+            self.run_command("sudo sysctl -w net.ipv4.ip_forward=1")
+            self.run_command("sudo sysctl -w net.ipv6.conf.all.forwarding=1")
+            sysctl_conf_path = "/etc/sysctl.conf"
+            with open(sysctl_conf_path, 'r+') as f:
+                content = f.read()
+                if 'net.ipv4.ip_forward = 1' not in content:
+                    f.write("\nnet.ipv4.ip_forward = 1\n")
+                if 'net.ipv6.conf.all.forwarding = 1' not in content:
+                    f.write("net.ipv6.conf.all.forwarding = 1\n")
+            self.run_command("sudo sysctl -p")
+            print("[+] IP forwarding enabled successfully.")
+        except Exception as e:
+            return False, f"Failed to enable IP forwarding: {e}"
+
+
         print("[+] Creating /etc/wireguard if not exists...")
         os.makedirs("/etc/wireguard", exist_ok=True)
         os.chmod("/etc/wireguard", 0o700)
-
+        env = os.environ.copy()
+        env["AP_PORT"] = '3446' # Ensure this is set for `bot.py` and `main.py`
         wg_id = 0 # Default initial interface ID
+        default_interface = self._get_default_interface()
+        interface_name = f"wg{wg_id}"
         server_private_key_path = SERVER_PRIVATE_KEY_PATH.replace('X', str(wg_id))
         server_public_key_path = SERVER_PUBLIC_KEY_PATH.replace('X', str(wg_id))
         wg_conf_path = WG_CONF_PATH.replace('X', str(wg_id))
@@ -330,9 +387,11 @@ AllowedIPs = {client_ip}/32
 Address = {wg_address_range}
 ListenPort = {wg_port}
 PrivateKey = {private_key}
-SaveConfig = true
-PostUp = ufw allow {wg_port}/udp
-PostDown = ufw delete allow {wg_port}/udp
+MTU = 1420
+DNS = 8.8.8.8
+
+PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
         """.strip()
 
         with open(wg_conf_path, "w") as f:
@@ -367,15 +426,16 @@ PostDown = ufw delete allow {wg_port}/udp
 
         # Update initial settings (e.g., server IP, DNS, admin credentials)
         self.db.update('settings', {'value': server_ip}, {'key': 'server_ip'})
+        self.db.update('settings', {'value': server_ip}, {'key': 'custom_endpont'})
         self.db.update('settings', {'value': wg_dns}, {'key': 'dns'})
         # IMPORTANT: In a real app, hash the admin password before storing!
         admin_data = json.dumps({'user': admin_user, 'password': admin_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
-        # Add cron job to run the script every 15 minutes (adjust as needed) self.run_command("*/15 * * * * python3 ./corn.py")
         current_dir = os.path.abspath(os.path.dirname(__file__))
         cron_script_path = os.path.join(current_dir, 'cron.py')
-        cron_line = f"*/15 * * * * python3 {cron_script_path} >> /var/log/candy-sync.log 2>&1"
+        backend_dir = os.path.dirname(cron_script_path)
+        cron_line = f"*/5 * * * * cd {backend_dir} && python3 {cron_script_path} >> /var/log/candy-sync.log 2>&1"
         self.run_command(f'(crontab -l 2>/dev/null; echo "{cron_line}") | crontab -')
         return True, 'Installed successfully!'
 
@@ -408,7 +468,7 @@ PostDown = ufw delete allow {wg_port}/udp
         download_speed_kbps = bytes_recv / 1024 # KB/s
 
         return {
-            'cpu': f"{psutil.cpu_percent()}%", # psutil.cpu_percent() without interval calculates since last call
+            'cpu': f"{psutil.cpu_percent()}%",
             'mem': {
                 'total': f"{mem.total / (1024**3):.2f} GB",
                 'available': f"{mem.available / (1024**3):.2f} GB",
@@ -432,6 +492,7 @@ PostDown = ufw delete allow {wg_port}/udp
         """
         Creates a new WireGuard client, generates its configuration, and adds it to the DB.
         'expire' should be a datetime string, 'traffic' should be a string representing bytes.
+        Initializes used_trafic with last_wg_rx/tx for future syncs.
         """
         if self.db.has('clients', {'name': name}):
             return False, 'Client with this name already exists.'
@@ -441,31 +502,29 @@ PostDown = ufw delete allow {wg_port}/udp
             return False, f"WireGuard interface wg{wg_id} not found."
 
         used_ips = self._get_used_ips(wg_id)
-        # Find the next available IP in the subnet
-        # Assumes server IP is .1 and clients start from .2
         network_address_prefix = interface_wg['address_range'].rsplit('.', 1)[0]
         next_ip_host_part = 2
-        # Ensure the generated IP is not already used by another client in the DB or in the WG config
-        while f"{network_address_prefix}.{next_ip_host_part}" in [client['address'] for client in self.db.select('clients', where={'wg': wg_id})] or next_ip_host_part in used_ips:
+
+        # Get IPs already assigned to clients in the DB for the current interface
+        existing_client_ips = {c['address'] for c in self.db.select('clients', where={'wg': wg_id})}
+
+        while f"{network_address_prefix}.{next_ip_host_part}" in existing_client_ips or next_ip_host_part in used_ips:
             next_ip_host_part += 1
-            if next_ip_host_part > 254: # Prevent infinite loop if subnet is full
+            if next_ip_host_part > 254:
                 return False, "No available IP addresses in the subnet."
 
         client_ip = f"{network_address_prefix}.{next_ip_host_part}"
         client_private, client_public = self._generate_keypair()
 
-        # Add peer to WireGuard config
         try:
             self._add_peer_to_config(wg_id, name, client_public, client_ip)
         except CommandExecutionError as e:
             return False, str(e)
 
-        server_pubkey = self._get_server_public_key(wg_id)
-        server_ip = self.db.get('settings', where={'key': 'server_ip'})['value']
+        server_ip = self.db.get('settings', where={'key': 'custom_endpont'})['value']
         dns = self.db.get('settings', where={'key': 'dns'})['value']
-        # MTU might not be available if not set in settings, provide a default
         mtu = self.db.get('settings', where={'key': 'mtu'})
-        mtu_value = mtu['value'] if mtu else '1420' # Default MTU if not found
+        mtu_value = mtu['value'] if mtu else '1420'
 
         client_config = f"""[Interface]
 PrivateKey = {client_private}
@@ -474,45 +533,72 @@ DNS = {dns}
 MTU = {mtu_value}
 
 [Peer]
-PublicKey = {interface_wg['public_key']} # Server's public key
+PublicKey = {interface_wg['public_key']}
 Endpoint = {server_ip}:{interface_wg['port']}
 AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
 """
-        # Store client data in DB
+        # Initialize used_trafic with current WG counters, download/upload are 0
+        # This assumes a brand new client won't have existing traffic on wg show
+        initial_used_traffic = json.dumps({'download': 0, 'upload': 0, 'last_wg_rx': 0, 'last_wg_tx': 0})
+
         self.db.insert('clients', {
             'name': name,
             'public_key': client_public,
             'private_key': client_private,
             'address': client_ip,
-            'created_at': datetime.now().isoformat(), # Store as ISO format string
-            'expires': expire, # Expecting ISO format or similar
+            'created_at': datetime.now().isoformat(),
+            'expires': expire,
             'traffic': traffic, # Total traffic quota in bytes
-            'used_trafic': json.dumps({'download': 0, 'upload': 0}), # Initialize used traffic
+            'used_trafic': initial_used_traffic,
             'wg': wg_id,
             'note': note,
-            'connected_now': False, # Initial status
-            'status': True # Active by default
+            'connected_now': False,
+            'status': True
         })
         return True, client_config
 
-    def _delete_client(self, client_name: str) -> tuple[bool, str]:
+    def _disable_client(self, client_name: str) -> tuple[bool, str]:
         """
-        Deletes a WireGuard client from the configuration and database.
+        Disables a WireGuard client by setting its status to False and removing from config.
         """
         client = self.db.get('clients', {'name': client_name})
         if not client:
             return False, f"Client '{client_name}' not found."
 
         wg_id = client['wg']
-        
+
         try:
             self._remove_peer_from_config(wg_id, client_name)
         except CommandExecutionError as e:
-            print(f"[!] Error during peer removal from config: {e}. Proceeding with DB deletion.")
-            # Decide if you want to abort here or proceed with DB deletion
+            print(f"[!] Error during peer removal from config for disabling: {e}. Proceeding with DB status update.")
+            # Decide if you want to abort here or proceed with DB status update
+            return False, f"Failed to remove peer from config: {e}"
 
-        # Delete client from database
+
+        # Update client status in database
+        self.db.update('clients', {'status': False}, {'name': client_name})
+        print(f"[+] Client '{client_name}' disabled successfully in DB.")
+        return True, f"Client '{client_name}' disabled successfully."
+
+    def _delete_client(self, client_name: str) -> tuple[bool, str]:
+        """
+        Deletes a WireGuard client completely (DB and config).
+        This should be a more manual, admin-triggered action, not automated by cron.
+        """
+        client = self.db.get('clients', {'name': client_name})
+        if not client:
+            return False, f"Client '{client_name}' not found."
+
+        wg_id = client['wg']
+        try:
+            self._remove_peer_from_config(wg_id, client['name']) # Use client['name']
+        except CommandExecutionError as e:
+            print(f"[!] Error during peer removal from config during deletion: {e}. Proceeding with DB deletion.")
+            # Decide if you want to abort here or proceed with DB deletion
+            # For a "delete" action, you might want to proceed even if config removal fails
+            # to at least clean up the DB.
+
         self.db.delete('clients', {'name': client_name})
         print(f"[+] Client '{client_name}' deleted successfully from DB.")
         return True, f"Client '{client_name}' deleted successfully."
@@ -528,7 +614,6 @@ PersistentKeepalive = 25
             return False, f"Client '{name}' not found."
 
         update_data = {}
-        config_needs_update = False
 
         if expire is not None:
             update_data['expires'] = expire
@@ -540,27 +625,26 @@ PersistentKeepalive = 25
         # Handle status change
         if status is not None and status != current_client['status']:
             update_data['status'] = status
-            config_needs_update = True
             wg_id = current_client['wg']
 
             if status: # Changing to Active
-                # Re-add peer to config
                 try:
                     self._add_peer_to_config(wg_id, name, current_client['public_key'], current_client['address'])
                 except CommandExecutionError as e:
                     return False, str(e)
             else: # Changing to Inactive
-                # Remove peer from config
                 try:
                     self._remove_peer_from_config(wg_id, name)
                 except CommandExecutionError as e:
                     return False, str(e)
 
+        # Only update if there's actual data to change
         if update_data:
             self.db.update('clients', update_data, {'name': name})
             return True, f"Client '{name}' edited successfully."
         else:
-            return False, "No update data provided."
+            return False, "No valid update data provided." # Or True, "Nothing to update." if that's desired
+
 
 
     def _new_interface_wg(self, address_range: str, port: int) -> tuple[bool, str]:
@@ -586,7 +670,7 @@ PersistentKeepalive = 25
 
         if self._interface_exists(interface_name):
             return False, f"Interface {interface_name} configuration file already exists."
-
+        default_interface = self._get_default_interface()
         private_key, public_key = self._generate_keypair()
         server_private_key_path = SERVER_PRIVATE_KEY_PATH.replace('X', str(new_wg_id))
         server_public_key_path = SERVER_PUBLIC_KEY_PATH.replace('X', str(new_wg_id))
@@ -599,9 +683,11 @@ PersistentKeepalive = 25
 PrivateKey = {private_key}
 Address = {address_range}
 ListenPort = {port}
-SaveConfig = true
-PostUp = ufw allow {port}/udp
-PostDown = ufw delete allow {port}/udp
+MTU = 1420
+DNS = 8.8.8.8
+
+PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
 """
         try:
             with open(path, "w") as f:
@@ -681,7 +767,7 @@ PostDown = ufw delete allow {port}/udp
                 else: # Changing to Inactive
                     self.run_command(f"sudo systemctl stop wg-quick@{name}")
                     print(f"[+] Interface {name} stopped.")
-            
+
             # Perform DB update only if there's data to update
             if update_data:
                 self.db.update('interfaces', update_data, {'wg': wg_id})
@@ -756,19 +842,19 @@ PostDown = ufw delete allow {port}/udp
         mtu = self.db.get('settings', where={'key': 'mtu'})
         mtu_value = mtu['value'] if mtu else '1420' # Default MTU if not found
 
-        server_ip = self.db.get('settings', where={'key': 'server_ip'})['value']
+        server_ip = self.db.get('settings', where={'key': 'custom_endpont'})['value']
 
         client_config = f"""
 [Interface]
 PrivateKey = {client['private_key']}
-Address = {client['address']}/32 # Corrected: Client's specific IP with /32 CIDR
+Address = {client['address']}/32
 DNS = {dns}
 MTU = {mtu_value}
 
 [Peer]
-PublicKey = {interface['public_key']} # Server's public key
+PublicKey = {interface['public_key']}
 Endpoint = {server_ip}:{interface['port']}
-AllowedIPs = 0.0.0.0/0, ::/0 # Allow all IPv4 and IPv6 traffic
+AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
 """
         return True, client_config
@@ -843,6 +929,184 @@ PersistentKeepalive = 25
             return False, "API tokens setting contains invalid JSON. Cannot retrieve token."
         except Exception as e:
             return False, f"Failed to retrieve API token: {e}"
+    def _is_telegram_bot_running(self, pid: int) -> bool:
+        """
+        Checks if the Telegram bot process with the given PID is running.
+        """
+        if pid <= 0:
+            return False
+        try:
+            process = psutil.Process(pid)
+            return process.is_running() and "bot.py" in " ".join(process.cmdline())
+        except psutil.NoSuchProcess:
+            return False
+        except Exception as e:
+            print(f"Error checking Telegram bot status for PID {pid}: {e}")
+            return False
+    def _manage_telegram_bot_process(self, action: str) -> bool:
+        """
+        Starts or stops the bot.py script as a detached subprocess.
+        Stores/clears its PID in the settings.
+        This method is called directly by API for immediate effect.
+        """
+        pid_setting = self.db.get('settings', where={'key': 'telegram_bot_pid'})
+        current_pid = int(pid_setting['value']) if pid_setting and pid_setting['value'].isdigit() else 0
+
+        is_running = self._is_telegram_bot_running(current_pid)
+
+        if action == 'start':
+            if is_running:
+                print(f"[*] Telegram bot (PID: {current_pid}) is already running.")
+                return True
+            print("[*] Attempting to start Telegram bot...")
+            try:
+                bot_token_setting = self.db.get('settings', where={'key': 'telegram_bot_token'})
+                api_id_setting = self.db.get('settings', where={'key': 'telegram_api_id'})
+                api_hash_setting = self.db.get('settings', where={'key': 'telegram_api_hash'})
+
+                if not bot_token_setting or bot_token_setting['value'] == 'YOUR_TELEGRAM_BOT_TOKEN':
+                    print("[!] Telegram bot token not configured. Cannot start bot.")
+                    return False
+                if not api_id_setting or not api_id_setting['value'].isdigit():
+                    print("[!] Telegram API ID not configured or invalid. Cannot start bot.")
+                    return False
+                if not api_hash_setting or not api_hash_setting['value']:
+                    print("[!] Telegram API Hash not configured. Cannot start bot.")
+                    return False
+
+                bot_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bot.py')
+
+                env = os.environ.copy()
+                env["TELEGRAM_API_ID"] = api_id_setting['value']
+                env["TELEGRAM_API_HASH"] = api_hash_setting['value']
+                log_file_path = "/var/log/candy-telegram-bot.log" # Or another suitable path
+                with open(log_file_path, "a") as log_file: # "a" for append mode
+                    process = subprocess.Popen(
+                        ['python3', bot_script_path],
+                        stdout=log_file,  # Redirect stdout to file
+                        stderr=log_file,  # Redirect stderr to file
+                        preexec_fn=os.setsid,
+                        env=env
+                    )
+                self.db.update('settings', {'value': str(process.pid)}, {'key': 'telegram_bot_pid'})
+                print(f"[+] Telegram bot started with PID: {process.pid}")
+                return True
+            except FileNotFoundError:
+                print(f"[!] Error: bot.py not found at {bot_script_path}. Cannot start bot.")
+                return False
+            except Exception as e:
+                print(f"[!] Failed to start Telegram bot: {e}")
+                return False
+
+        elif action == 'stop':
+            if not is_running:
+                print("[*] Telegram bot is already stopped.")
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+                return True # Already in desired state
+
+            print("[*] Attempting to stop Telegram bot...")
+            try:
+                process = psutil.Process(current_pid)
+                cmdline = " ".join(process.cmdline()).lower()
+                if "bot.py" in cmdline:
+                    process.terminate()
+                    process.wait(timeout=5)
+                    print(f"[+] Telegram bot (PID: {current_pid}) stopped.")
+                else:
+                    print(f"[!] PID {current_pid} is not the Telegram bot. Not terminating.")
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+                return True
+            except psutil.NoSuchProcess:
+                print(f"[!] Telegram bot process with PID {current_pid} not found. Assuming it's already stopped.")
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+                return False
+            except psutil.TimeoutExpired:
+                print(f"[!] Telegram bot process with PID {current_pid} did not terminate gracefully. Killing...")
+                process.kill()
+                process.wait()
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+                return True
+            except Exception as e:
+                print(f"[!] Error stopping Telegram bot (PID: {current_pid}): {e}")
+                return False
+        return False # Invalid action
+
+    def _calculate_and_update_traffic(self):
+        """
+        Calculates and updates cumulative traffic for all clients.
+        This replaces the old traffic.json logic.
+        """
+        print("[*] Calculating and updating client traffic statistics...")
+
+        # Get current traffic from all interfaces
+        current_wg_traffic = {}
+        for interface_row in self.db.select('interfaces'):
+            wg_id = interface_row['wg']
+            current_wg_traffic.update(self._get_current_wg_peer_traffic(wg_id))
+
+        # Total bandwidth consumed by all clients in this cycle
+        total_bandwidth_consumed_this_cycle = 0
+
+        # Iterate through all clients in the database
+        all_clients_in_db = self.db.select('clients')
+        for client in all_clients_in_db:
+            client_public_key = client['public_key']
+            client_name = client['name']
+
+            # Get the current readings from 'wg show dump'
+            current_rx = current_wg_traffic.get(client_public_key, {}).get('rx', 0)
+            current_tx = current_wg_traffic.get(client_public_key, {}).get('tx', 0)
+
+            try:
+                # Parse existing used_trafic data (which now includes last_wg_rx/tx)
+                used_traffic_data = json.loads(client.get('used_trafic', '{"download":0,"upload":0,"last_wg_rx":0,"last_wg_tx":0}'))
+
+                cumulative_download = used_traffic_data.get('download', 0)
+                cumulative_upload = used_traffic_data.get('upload', 0)
+                last_wg_rx = used_traffic_data.get('last_wg_rx', 0)
+                last_wg_tx = used_traffic_data.get('last_wg_tx', 0)
+
+                # Calculate delta for this sync cycle
+                # Handle WireGuard counter resets: If current < last, assume reset and add current as delta.
+                delta_rx = current_rx - last_wg_rx
+                if delta_rx < 0:
+                    print(f"[*] Detected RX counter reset for client '{client_name}'. Adding current RX ({current_rx} bytes) as delta.")
+                    delta_rx = current_rx
+
+                delta_tx = current_tx - last_wg_tx
+                if delta_tx < 0:
+                    print(f"[*] Detected TX counter reset for client '{client_name}'. Adding current TX ({current_tx} bytes) as delta.")
+                    delta_tx = current_tx
+
+                delta_rx = max(0, delta_rx) # Ensure non-negative
+                delta_tx = max(0, delta_tx) # Ensure non-negative
+
+                # Update cumulative totals
+                cumulative_download += delta_rx
+                cumulative_upload += delta_tx
+
+                # Prepare updated JSON for DB
+                updated_used_traffic = {
+                    'download': cumulative_download,
+                    'upload': cumulative_upload,
+                    'last_wg_rx': current_rx, # Store current readings for next cycle's delta calculation
+                    'last_wg_tx': current_tx
+                }
+
+                self.db.update('clients', {'used_trafic': json.dumps(updated_used_traffic)}, {'name': client_name})
+
+                total_bandwidth_consumed_this_cycle += (delta_rx + delta_tx)
+
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                print(f"[!] Error processing traffic for client '{client_name}': {e}. Skipping this client's traffic update.")
+
+        # Update overall server bandwidth in settings
+        old_bandwidth_setting = self.db.get('settings', where={'key': 'bandwidth'})
+        current_total_bandwidth = int(old_bandwidth_setting['value']) if old_bandwidth_setting and old_bandwidth_setting['value'].isdigit() else 0
+        new_total_bandwidth = current_total_bandwidth + total_bandwidth_consumed_this_cycle
+        self.db.update('settings', {'value': str(new_total_bandwidth)}, {'key': 'bandwidth'})
+        print("[*] Client traffic statistics updated.")
+
 
     def _sync(self):
         """
@@ -892,6 +1156,7 @@ PersistentKeepalive = 25
             if os.path.exists(reset_timer_file):
                 os.remove(reset_timer_file) # Clean up if reset_time is 0
 
+
         # --- Auto Backup ---
         auto_backup_setting = self.db.get('settings', where={'key': 'auto_backup'})
         auto_backup_enabled = bool(int(auto_backup_setting['value'])) if auto_backup_setting and auto_backup_setting['value'].isdigit() else False
@@ -901,137 +1166,66 @@ PersistentKeepalive = 25
             for interface in self.db.select('interfaces'):
                 self._backup_config(interface['wg'])
 
-        # --- Client Expiration and Traffic Limit Enforcement ---
+        # --- Client Expiration and Traffic Limit Enforcement (Disable, not Delete) ---
         current_time = datetime.now()
-        # Fetch all clients once to avoid repeated DB queries inside the loop
-        all_clients = list(self.db.select('clients')) # Make a copy to iterate, as deletions modify the underlying data
-        for user in all_clients:
-            # Re-check if client still exists in DB, as it might have been deleted by a previous iteration
-            # (e.g., if multiple clients expire in one sync and are processed in order)
-            if not self.db.has('clients', {'name': user['name']}):
-                continue
-
-            should_delete = False
-            delete_reason = ""
+        # FIX: Fetch all clients to disable into a list first, BEFORE iterating and updating
+        clients_to_disable = []
+        active_clients = self.db.select('clients', where={'status': True})
+        for client in active_clients: # Iterating over fetched results
+            should_disable = False
+            disable_reason = ""
 
             # Check expiration
             try:
-                expires_dt = datetime.fromisoformat(user['expires'])
+                expires_dt = datetime.fromisoformat(client['expires'])
                 if current_time >= expires_dt:
-                    should_delete = True
-                    delete_reason = "expired"
+                    should_disable = True
+                    disable_reason = "expired"
             except (ValueError, TypeError):
-                print(f"[!] Warning: Invalid expires date format for client '{user['name']}'. Skipping expiration check.")
+                print(f"[!] Warning: Invalid expires date format for client '{client['name']}'. Skipping expiration check.")
 
-            # Check traffic limit (only if not already marked for deletion by expiration)
-            if not should_delete:
+            # Check traffic limit (only if not already marked for disabling by expiration)
+            if not should_disable:
                 try:
-                    traffic_limit = int(user['traffic']) # Expected total traffic quota in bytes
-                    used_traffic_data = json.loads(user['used_trafic'])
+                    traffic_limit = int(client['traffic']) # Expected total traffic quota in bytes
+                    used_traffic_data = json.loads(client['used_trafic'])
                     total_used_traffic = used_traffic_data.get('download', 0) + used_traffic_data.get('upload', 0)
 
-                    if traffic_limit > 0 and total_used_traffic >= traffic_limit: # Only enforce if limit > 0
-                        should_delete = True
-                        delete_reason = "exceeded traffic limit"
+                    if traffic_limit > 0 and total_used_traffic >= traffic_limit:
+                        should_disable = True
+                        disable_reason = "exceeded traffic limit"
                 except (ValueError, TypeError, json.JSONDecodeError) as e:
-                    print(f"[!] Warning: Invalid traffic data for client '{user['name']}'. Skipping traffic limit check. Error: {e}")
+                    print(f"[!] Warning: Invalid traffic data for client '{client['name']}'. Skipping traffic limit check. Error: {e}")
 
-            if should_delete:
-                print(f"[!] Client '{user['name']}' {delete_reason}. Deleting...")
-                self._delete_client(user['name']) # This will remove it from DB and config
+            if should_disable:
+                clients_to_disable.append(client['name']) # Collect names to disable
 
+        # Now, iterate over the collected names and perform the database updates
+        for client_name_to_disable in clients_to_disable:
+            print(f"[!] Client '{client_name_to_disable}' needs disabling. Disabling...")
+            self._disable_client(client_name_to_disable)
         # --- Update Traffic Statistics ---
-        old_data = self.load_traffic_db() # Data from previous sync
-        current_data = self._get_current_traffic() # Current data from 'wg show'
-
-        total_bandwidth_consumed_this_cycle = 0
-
-        for wg_id, peers in current_data.items():
-            for pubkey, stats in peers.items():
-                old_entry = old_data.get(pubkey, {
-                    'allowed_ip': stats['ip'],
-                    'total_rx': 0, # Cumulative download
-                    'total_tx': 0, # Cumulative upload
-                    'last_rx': 0,  # Last observed rx from wg show
-                    'last_tx': 0,  # Last observed tx from wg show
-                    'created_at': datetime.now().isoformat()
-                })
-
-                # --- Traffic Reset Handling (Point 19 Fix) ---
-                # Calculate delta based on whether counters reset or are continuous
-                # If current counter is less than last, assume reset and take current value as delta
-                delta_rx = stats['rx'] - old_entry.get('last_rx', 0)
-                if delta_rx < 0: # Counter reset detected
-                    delta_rx = stats['rx'] # Add the current reading as the delta for this cycle
-                    print(f"[*] Detected RX counter reset for {pubkey} on wg{wg_id}. Adding current RX ({stats['rx']} bytes) as delta.")
-                delta_tx = stats['tx'] - old_entry.get('last_tx', 0)
-                if delta_tx < 0: # Counter reset detected
-                    delta_tx = stats['tx'] # Add the current reading as the delta for this cycle
-                    print(f"[*] Detected TX counter reset for {pubkey} on wg{wg_id}. Adding current TX ({stats['tx']} bytes) as delta.")
-
-                # Ensure deltas are non-negative (should be handled by above logic, but as a safeguard)
-                delta_rx = max(0, delta_rx)
-                delta_tx = max(0, delta_tx)
-
-                # Update cumulative traffic
-                old_entry['total_rx'] += delta_rx
-                old_entry['total_tx'] += delta_tx
-
-                # Update used_trafic in the clients table
-                # Find the client by public key (assuming public_key is unique for clients)
-                client_in_db = self.db.get('clients', where={'public_key': pubkey})
-                if client_in_db:
-                    # Ensure used_trafic in DB is always updated with cumulative values
-                    traffic_to_db = {'download': old_entry['total_rx'], 'upload': old_entry['total_tx']}
-                    self.db.update('clients', {'used_trafic': json.dumps(traffic_to_db)}, {'public_key': pubkey})
-                else:
-                    print(f"[!] Warning: Client with public key {pubkey} found in wg show but not in DB. Skipping DB update for this client's traffic.")
-
-                # Update last observed values for the next sync cycle
-                old_entry['last_rx'] = stats['rx']
-                old_entry['last_tx'] = stats['tx']
-                old_entry['updated_at'] = datetime.now().isoformat()
-                old_data[pubkey] = old_entry
-
-                # Accumulate total bandwidth for the server
-                total_bandwidth_consumed_this_cycle += (delta_rx + delta_tx)
-
-        self.save_traffic_db(old_data) # Save updated traffic data to file
-
-        # Update server's total bandwidth in settings
-        old_bandwidth_setting = self.db.get('settings', where={'key': 'bandwidth'})
-        current_total_bandwidth = int(old_bandwidth_setting['value']) if old_bandwidth_setting and old_bandwidth_setting['value'].isdigit() else 0
-        new_total_bandwidth = current_total_bandwidth + total_bandwidth_consumed_this_cycle
-        self.db.update('settings', {'value': str(new_total_bandwidth)}, {'key': 'bandwidth'})
-
+        self._calculate_and_update_traffic()
 
         # --- Update Uptime ---
-        uptime_file = 'up.time'
-        try:
-            if not os.path.exists(uptime_file):
-                start_timestamp = int(time.time())
-                with open(uptime_file, 'w') as o:
-                    o.write(f"{start_timestamp}|{start_timestamp}")
-                # Initialize uptime in DB to 0 when file is first created
-                self.db.update('settings', {'value': '0'}, {'key': 'uptime'})
-            else:
-                with open(uptime_file, 'r') as o:
-                    content = o.read().split('|')
-                    start_timestamp = int(content[0])
-                current_timestamp = int(time.time())
-                with open(uptime_file, 'w') as o:
-                    o.write(f"{start_timestamp}|{current_timestamp}")
-                calculated_uptime_seconds = current_timestamp - start_timestamp
-                self.db.update('settings', {'value': str(calculated_uptime_seconds)}, {'key': 'uptime'})
-        except (ValueError, IndexError, FileNotFoundError) as e:
-            print(f"Error updating uptime: {e}. Uptime tracking might be inaccurate.")
-            # Ensure uptime is reset/handled if file is corrupted
-            self.db.update('settings', {'value': '0'}, {'key': 'uptime'})
-            if os.path.exists(uptime_file):
-                os.remove(uptime_file) # Remove corrupted file to allow recreation
+        # Get system boot time and calculate uptime
+        boot_time_timestamp = psutil.boot_time() # Returns UTC timestamp
+        current_timestamp = time.time()
+        calculated_uptime_seconds = int(current_timestamp - boot_time_timestamp)
+        self.db.update('settings', {'value': str(calculated_uptime_seconds)}, {'key': 'uptime'})
+        print("[*] Uptime updated.")
 
+        # --- Ensure AP_PORT setting is in sync with environment (for display purposes) ---
+        # This just updates the DB with what the system is actually running on, not
+        # to trigger a change in the running port which needs a Flask app restart.
+        actual_ap_port = os.environ.get('AP_PORT', '3446')
+        stored_ap_port = self.db.get('settings', where={'key': 'ap_port'})
+        if not stored_ap_port or stored_ap_port['value'] != actual_ap_port:
+            self.db.update('settings', {'value': actual_ap_port}, {'key': 'ap_port'})
+            print(f"[*] Updated ap_port in settings to reflect environment variable: {actual_ap_port}")
 
         print("[*] Synchronization process completed.")
+
 
 # Custom exception for command execution errors
 class CommandExecutionError(Exception):

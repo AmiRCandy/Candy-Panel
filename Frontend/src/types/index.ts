@@ -54,9 +54,23 @@ export interface AuthData {
   token_type: string;
 }
 
+// New interfaces for Telegram and API Tokens
+export interface TelegramSettings {
+  telegram_bot_status: string;
+  telegram_bot_admin_id: string;
+  telegram_bot_token: string;
+  telegram_bot_prices: string; // Stored as JSON string
+}
+
+export interface ApiTokens {
+  [key: string]: string; // A dictionary where key is token name, value is the token string
+}
+
 export interface AllData {
   dashboard: DashboardStats;
   clients: Client[];
   interfaces: Interface[];
   settings: Record<string, string>;
+  // Add new fields for Telegram settings and API tokens if they are returned directly by getAllData
+  // For now, these are part of 'settings' record, but if backend changes, they can be separate.
 }

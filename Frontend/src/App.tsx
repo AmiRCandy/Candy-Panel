@@ -1,17 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Server, 
-  Users, 
-  Settings, 
-  Activity, 
-  Plus, 
-  Edit, 
-  Trash2, 
-  Download, 
-  Eye, 
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Server,
+  Users,
+  Settings,
+  Activity,
+  Plus,
+  Edit,
+  Trash2,
+  Download,
+  Eye,
   EyeOff,
   RefreshCw,
-  Wifi,
   AlertCircle,
   CheckCircle,
   Clock,
@@ -20,13 +19,11 @@ import {
   Network,
   LogOut,
   Shield,
-  Moon,
-  Sun,
   Bot, // New icon for Telegram Bot
   Key // New icon for API Tokens
 } from 'lucide-react';
 import { apiClient } from './utils/api';
-import { Client, Interface, DashboardStats, AllData, ApiTokens } from './types';
+import { Client, Interface, AllData, ApiTokens } from './types';
 
 interface TabButtonProps {
   icon: React.ReactNode;
@@ -61,7 +58,7 @@ const formatUptime = (seconds: number): string => {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  
+
   if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
@@ -72,9 +69,10 @@ function App() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [data, setData] = useState<AllData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // Set to true initially for first load
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
+  const initialLoadRef = useRef(true); // Ref to track the very first data load
 
   // Auth form states
   const [username, setUsername] = useState('');
@@ -111,6 +109,7 @@ function App() {
 
   // Settings states
   const [settingsValues, setSettingsValues] = useState<Record<string, string>>({});
+  const [stagedSettings, setStagedSettings] = useState<Record<string, string>>({}); // New state for settings changes
   const [apiTokens, setApiTokens] = useState<ApiTokens>({}); // New state for API tokens
   const [newApiTokenName, setNewApiTokenName] = useState('');
   const [newApiTokenValue, setNewApiTokenValue] = useState('');
@@ -120,40 +119,69 @@ function App() {
     checkAuth();
   }, []);
 
+  useEffect(() => {
+    if (isAuthenticated) {
+      if (activeTab === 'dashboard') {
+        loadData(); // Initial load
+      }
+      const interval = setInterval(() => {
+        if (activeTab === 'dashboard') {
+          loadData(false); // Subsequent loads, don't show full loading state on failure
+        }
+      }, 5000); // Fetch every 5 seconds
+      return () => clearInterval(interval); // Clean up on unmount
+    }
+  }, [isAuthenticated, activeTab]);
+
   const checkAuth = async () => {
     try {
       const { installed } = await apiClient.checkInstallation();
       setIsInstalled(installed);
-      
+
       if (installed && apiClient.isAuthenticated()) {
         setIsAuthenticated(true);
-        await loadData();
+      } else {
+        setLoading(false); // If not authenticated, stop loading immediately
       }
     } catch (err) {
       console.error('Auth check failed:', err);
+      setLoading(false); // If auth check fails, stop loading
     }
   };
 
-  const loadData = async () => {
-    try {
+  const loadData = async (showFullLoading = true) => {
+    if (showFullLoading || initialLoadRef.current) {
       setLoading(true);
+    }
+    try {
       const response = await apiClient.getAllData();
       if (response.success && response.data) {
         setData(response.data);
         setSettingsValues(response.data.settings);
+        setStagedSettings(response.data.settings); // Initialize staged settings
         try {
-          // Attempt to parse api_tokens from settings
           const parsedApiTokens = JSON.parse(response.data.settings.api_tokens || '{}');
           setApiTokens(parsedApiTokens);
         } catch (e) {
           console.error("Failed to parse API tokens from settings:", e);
-          setApiTokens({}); // Fallback to empty object on error
+          setApiTokens({});
+        }
+      } else {
+        // If data load fails, and it's not the initial load, keep previous data
+        if (initialLoadRef.current) {
+          setError(response.message || 'Failed to load data.');
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      if (initialLoadRef.current) {
+        setError(err instanceof Error ? err.message : 'Failed to load data');
+      }
+      console.error('Error loading data:', err);
     } finally {
-      setLoading(false);
+      if (showFullLoading || initialLoadRef.current) {
+        setLoading(false);
+        initialLoadRef.current = false;
+      }
     }
   };
 
@@ -178,7 +206,7 @@ function App() {
       const response = await apiClient.login(username, password);
       if (response.success) {
         setIsAuthenticated(true);
-        await loadData();
+        // loadData will be called by useEffect after isAuthenticated changes
         showMessage('Login successful!');
       }
     } catch (err) {
@@ -203,6 +231,7 @@ function App() {
       if (response.success) {
         setIsInstalled(true);
         showMessage('Installation completed successfully!');
+        // No need to call loadData here, checkAuth will handle it
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Installation failed', true);
@@ -215,14 +244,14 @@ function App() {
     e.preventDefault();
     try {
       setLoading(true);
-      
+      const trafficInBytes = (parseFloat(clientTraffic) * 1024 * 1024).toString();
       if (editingClient) {
         const response = await apiClient.updateClient({
           name: editingClient.name,
           expires: clientExpires,
-          traffic: clientTraffic,
+          traffic: trafficInBytes,
           note: clientNote,
-          status: clientStatus, // Pass client status
+          status: clientStatus,
         });
         if (response.success) {
           showMessage('Client updated successfully!');
@@ -231,7 +260,7 @@ function App() {
         const response = await apiClient.createClient({
           name: clientName,
           expires: clientExpires,
-          traffic: clientTraffic,
+          traffic: trafficInBytes,
           wg_id: parseInt(clientWgId),
           note: clientNote,
         });
@@ -239,7 +268,7 @@ function App() {
           showMessage('Client created successfully!');
         }
       }
-      
+
       resetClientForm();
       await loadData();
     } catch (err) {
@@ -279,7 +308,7 @@ function App() {
     setClientTraffic('');
     setClientWgId('0');
     setClientNote('');
-    setClientStatus(true); // Reset client status
+    setClientStatus(true);
   };
 
   const editClient = (client: Client) => {
@@ -289,14 +318,13 @@ function App() {
     setClientTraffic(client.traffic);
     setClientWgId(client.wg.toString());
     setClientNote(client.note);
-    setClientStatus(client.status); // Set client status for editing
+    setClientStatus(client.status);
     setShowClientForm(true);
   };
 
   const deleteClient = async (name: string) => {
-    // Replaced window.confirm with a custom modal/dialog in a real app
     if (!confirm(`Are you sure you want to delete client "${name}"?`)) return;
-    
+
     try {
       setLoading(true);
       const response = await apiClient.deleteClient(name);
@@ -329,12 +357,21 @@ function App() {
   };
 
   const handleSync = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
+      // Apply staged settings first
+      for (const key in stagedSettings) {
+        if (stagedSettings.hasOwnProperty(key) && settingsValues[key] !== stagedSettings[key]) {
+          await apiClient.updateSetting(key, stagedSettings[key]);
+        }
+      }
+      
       const response = await apiClient.sync();
       if (response.success) {
         showMessage('Sync completed successfully!');
-        await loadData();
+        await loadData(); // Reload data to reflect all changes
+      } else {
+        showMessage(response.message || 'Sync failed.', true);
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Sync failed', true);
@@ -343,16 +380,8 @@ function App() {
     }
   };
 
-  const updateSetting = async (key: string, value: string) => {
-    try {
-      const response = await apiClient.updateSetting(key, value);
-      if (response.success) {
-        setSettingsValues(prev => ({ ...prev, [key]: value }));
-        showMessage('Setting updated successfully!');
-      }
-    } catch (err) {
-      showMessage(err instanceof Error ? err.message : 'Update failed', true);
-    }
+  const updateStagedSetting = (key: string, value: string) => {
+    setStagedSettings(prev => ({ ...prev, [key]: value }));
   };
 
   const handleAddApiToken = async (e: React.FormEvent) => {
@@ -369,7 +398,7 @@ function App() {
         setNewApiTokenName('');
         setNewApiTokenValue('');
         setShowApiTokenForm(false);
-        await loadData(); // Reload data to get updated API tokens
+        await loadData();
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Failed to add/update API token', true);
@@ -379,14 +408,13 @@ function App() {
   };
 
   const handleDeleteApiToken = async (name: string) => {
-    // Replaced window.confirm with a custom modal/dialog in a real app
     if (!confirm(`Are you sure you want to delete API token "${name}"?`)) return;
     try {
       setLoading(true);
       const response = await apiClient.deleteApiToken(name);
       if (response.success) {
         showMessage('API token deleted successfully!');
-        await loadData(); // Reload data to get updated API tokens
+        await loadData();
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Failed to delete API token', true);
@@ -428,7 +456,6 @@ function App() {
   };
 
   const handleDeleteInterface = async (wg_id: number) => {
-    // Replaced window.confirm with a custom modal/dialog in a real app
     if (!confirm(`Are you sure you want to delete WireGuard interface wg${wg_id} and all its associated clients? This action cannot be undone.`)) return;
     try {
       setLoading(true);
@@ -448,6 +475,8 @@ function App() {
     apiClient.logout();
     setIsAuthenticated(false);
     setData(null);
+    setLoading(false); // Stop loading after logout
+    initialLoadRef.current = true; // Reset for next login
   };
 
   if (!isInstalled) {
@@ -487,7 +516,7 @@ function App() {
                 />
               </div>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1">Address Range</label>
@@ -645,7 +674,12 @@ function App() {
   }
 
   const renderDashboard = () => {
-    if (!data) return null;
+    if (!data) return (
+      <div className="flex items-center justify-center py-12">
+        <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
+        <span className="ml-2 text-gray-400">Loading dashboard data...</span>
+      </div>
+    );
 
     const { dashboard } = data;
 
@@ -790,7 +824,12 @@ function App() {
   };
 
   const renderClients = () => {
-    if (!data) return null;
+    if (!data) return (
+      <div className="flex items-center justify-center py-12">
+        <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
+        <span className="ml-2 text-gray-400">Loading client data...</span>
+      </div>
+    );
 
     return (
       <div className="space-y-6 animate-fade-in">
@@ -835,7 +874,7 @@ function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Traffic Limit (bytes)</label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Traffic Limit (MB)</label>
                   <input
                     type="number"
                     value={clientTraffic}
@@ -978,7 +1017,7 @@ function App() {
                             onClick={() => deleteClient(client.name)}
                             className="p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
                             title="Delete Client"
-                          >
+                            >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
@@ -995,13 +1034,20 @@ function App() {
   };
 
   const renderSettings = () => {
-    if (!data) return null;
+    if (!data) return (
+      <div className="flex items-center justify-center py-12">
+        <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
+        <span className="ml-2 text-gray-400">Loading settings data...</span>
+      </div>
+    );
 
     const commonSettings = [
       { key: 'server_ip', label: 'Server IP', type: 'text' },
+      { key: 'custom_endpont', label: 'Custom Endpoint', type: 'text' },
       { key: 'dns', label: 'DNS Server', type: 'text' },
       { key: 'mtu', label: 'MTU', type: 'number' },
       { key: 'reset_time', label: 'Reset Time (hours)', type: 'number' },
+      { key: 'ap_port', label: 'API + Panel Port', type: 'number' },
       { key: 'auto_backup', label: 'Auto Backup', type: 'select', options: [{ value: '1', label: 'Enabled' }, { value: '0', label: 'Disabled' }] },
     ];
 
@@ -1023,7 +1069,7 @@ function App() {
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all duration-200 transform hover:scale-105"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              Sync
+              Sync & Apply
             </button>
           </div>
         </div>
@@ -1154,8 +1200,8 @@ function App() {
                 </label>
                 {setting.type === 'select' ? (
                   <select
-                    value={settingsValues[setting.key] || ''}
-                    onChange={(e) => updateSetting(setting.key, e.target.value)}
+                    value={stagedSettings[setting.key] || ''}
+                    onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
                     className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                   >
                     {setting.options?.map((option) => (
@@ -1167,8 +1213,8 @@ function App() {
                 ) : (
                   <input
                     type={setting.type}
-                    value={settingsValues[setting.key] || ''}
-                    onChange={(e) => updateSetting(setting.key, e.target.value)}
+                    value={stagedSettings[setting.key] || ''}
+                    onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
                     className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                   />
                 )}
@@ -1191,14 +1237,14 @@ function App() {
                     type="checkbox"
                     id="telegram-bot-status-toggle"
                     className="sr-only"
-                    checked={settingsValues['telegram_bot_status'] === '1'}
-                    onChange={(e) => updateSetting('telegram_bot_status', e.target.checked ? '1' : '0')}
+                    checked={stagedSettings['telegram_bot_status'] === '1'}
+                    onChange={(e) => updateStagedSetting('telegram_bot_status', e.target.checked ? '1' : '0')}
                   />
                   <div className="block bg-gray-600 w-14 h-8 rounded-full"></div>
-                  <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition ${settingsValues['telegram_bot_status'] === '1' ? 'translate-x-full bg-blue-600' : ''}`}></div>
+                  <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition ${stagedSettings['telegram_bot_status'] === '1' ? 'translate-x-full bg-blue-600' : ''}`}></div>
                 </div>
                 <div className="ml-3 text-gray-300 font-medium">
-                  {settingsValues['telegram_bot_status'] === '1' ? 'Enabled' : 'Disabled'}
+                  {stagedSettings['telegram_bot_status'] === '1' ? 'Enabled' : 'Disabled'}
                 </div>
               </label>
             </div>
@@ -1206,8 +1252,8 @@ function App() {
               <label className="block text-sm font-medium text-gray-300 mb-2">Admin Telegram ID</label>
               <input
                 type="text"
-                value={settingsValues['telegram_bot_admin_id'] || ''}
-                onChange={(e) => updateSetting('telegram_bot_admin_id', e.target.value)}
+                value={stagedSettings['telegram_bot_admin_id'] || ''}
+                onChange={(e) => updateStagedSetting('telegram_bot_admin_id', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                 placeholder="Your Telegram User ID"
               />
@@ -1216,20 +1262,50 @@ function App() {
               <label className="block text-sm font-medium text-gray-300 mb-2">Bot Token</label>
               <input
                 type="text"
-                value={settingsValues['telegram_bot_token'] || ''}
-                onChange={(e) => updateSetting('telegram_bot_token', e.target.value)}
+                value={stagedSettings['telegram_bot_token'] || ''}
+                onChange={(e) => updateStagedSetting('telegram_bot_token', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                 placeholder="Your Telegram Bot Token"
               />
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">API ID</label>
+              <input
+                type="text"
+                value={stagedSettings['telegram_api_id'] || ''}
+                onChange={(e) => updateStagedSetting('telegram_api_id', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                placeholder="Your API ID"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">API HASH</label>
+              <input
+                type="text"
+                value={stagedSettings['telegram_api_hash'] || ''}
+                onChange={(e) => updateStagedSetting('telegram_api_hash', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                placeholder="Your API HASH"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Card Number</label>
+              <input
+                type="text"
+                value={stagedSettings['admin_card_number'] || ''}
+                onChange={(e) => updateStagedSetting('admin_card_number', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                placeholder="Your Card number for seller"
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">Prices (JSON)</label>
               <textarea
-                value={settingsValues['telegram_bot_prices'] || ''}
-                onChange={(e) => updateSetting('telegram_bot_prices', e.target.value)}
+                value={stagedSettings['prices'] || ''}
+                onChange={(e) => updateStagedSetting('prices', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                 rows={4}
-                placeholder='{"per_month":75000,"per_gb":4000}'
+                placeholder='{"1Month":75000,"1GB":4000}'
               />
               <p className="text-xs text-gray-500 mt-1">Enter as a valid JSON string, e.g., `"per_month":75000,"per_gb":4000`</p>
             </div>
@@ -1394,54 +1470,59 @@ function App() {
               </div>
               <h1 className="text-xl font-bold text-white">Candy Panel</h1>
             </div>
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"
-            >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Logout</span>
-            </button>
+            {isAuthenticated && (
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline">Logout</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
 
       {/* Navigation */}
-      <nav className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-4 py-4 overflow-x-auto">
-            <TabButton
-              icon={<Activity className="w-4 h-4" />}
-              label="Dashboard"
-              isActive={activeTab === 'dashboard'}
-              onClick={() => setActiveTab('dashboard')}
-            />
-            <TabButton
-              icon={<Users className="w-4 h-4" />}
-              label="Clients"
-              isActive={activeTab === 'clients'}
-              onClick={() => setActiveTab('clients')}
-            />
-            <TabButton
-              icon={<Settings className="w-4 h-4" />}
-              label="Settings"
-              isActive={activeTab === 'settings'}
-              onClick={() => setActiveTab('settings')}
-            />
+      {isAuthenticated && (
+        <nav className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex space-x-4 py-4 overflow-x-auto">
+              <TabButton
+                icon={<Activity className="w-4 h-4" />}
+                label="Dashboard"
+                isActive={activeTab === 'dashboard'}
+                onClick={() => setActiveTab('dashboard')}
+              />
+              <TabButton
+                icon={<Users className="w-4 h-4" />}
+                label="Clients"
+                isActive={activeTab === 'clients'}
+                onClick={() => setActiveTab('clients')}
+              />
+              <TabButton
+                icon={<Settings className="w-4 h-4" />}
+                label="Settings"
+                isActive={activeTab === 'settings'}
+                onClick={() => setActiveTab('settings')}
+              />
+            </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {loading && !data && (
+        {isAuthenticated && loading && !data && ( // Show loading only if authenticated and no data loaded yet
           <div className="flex items-center justify-center py-12">
             <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
+            <span className="ml-2 text-gray-400">Loading data...</span>
           </div>
         )}
 
-        {activeTab === 'dashboard' && renderDashboard()}
-        {activeTab === 'clients' && renderClients()}
-        {activeTab === 'settings' && renderSettings()}
+        {isAuthenticated && activeTab === 'dashboard' && renderDashboard()}
+        {isAuthenticated && activeTab === 'clients' && renderClients()}
+        {isAuthenticated && activeTab === 'settings' && renderSettings()}
       </main>
 
       {/* Messages */}
