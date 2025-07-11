@@ -50,7 +50,7 @@ print_success() {
 }
 
 print_error() {
-    echo -e "${RED}ERROR:${RESET} $1" >&2
+e   cho -e "${RED}ERROR:${RESET} $1" >&2
 }
 
 print_warning() {
@@ -70,11 +70,21 @@ confirm_action() {
 check_prerequisites() {
     print_info "Checking for required system packages..."
     local missing_packages=()
-    for cmd in git python3 ufw cron python3.10-venv build-essential python3-dev openresolv; do
+    
+    # Get the system's default Python 3 version
+    PYTHON_VERSION=$(python3 -c "import sys; print(f'python3.{sys.version_info.minor}')")
+    PYTHON_VENV_PACKAGE="${PYTHON_VERSION}-venv"
+
+    for cmd in git python3 ufw cron build-essential python3-dev openresolv; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_packages+=("$cmd")
         fi
     done
+
+    # Add the specific python3-venv package based on the system's Python 3 version
+    if ! dpkg -s "$PYTHON_VENV_PACKAGE" &> /dev/null; then
+        missing_packages+=("$PYTHON_VENV_PACKAGE")
+    fi
 
     if ! command -v curl &> /dev/null; then
         missing_packages+=("curl")
@@ -103,7 +113,7 @@ check_prerequisites() {
 
         if [ $? -ne 0 ]; then
             print_error "Failed to install some required packages. Please check the output and install them manually."
-            exit 1
+            #exit 1
         else
             print_success "Missing packages installed successfully."
         fi
@@ -203,7 +213,7 @@ clone_or_update_repo() {
         print_warning "Project directory '$PROJECT_ROOT' already exists."
         confirm_action "Do you want to pull the latest changes from the repository?"
         print_info "Navigating to $PROJECT_ROOT and pulling latest changes..."
-        sudo git -C "$PROJECT_ROOT" pull origin dev.test || sudo git -C "$PROJECT_ROOT" pull origin dev.test
+        sudo git -C "$PROJECT_ROOT" pull origin main || sudo git -C "$PROJECT_ROOT" pull origin main
         if [ $? -ne 0 ]; then
             print_error "Failed to pull latest changes from repository. Check permissions or network."
             exit 1
@@ -213,7 +223,7 @@ clone_or_update_repo() {
         print_info "Cloning repository '$REPO_URL' into '$PROJECT_ROOT'..."
         sudo mkdir -p "$(dirname "$PROJECT_ROOT")"
 
-        sudo git clone --branch dev.test --single-branch "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
+        sudo git clone --branch main --single-branch "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
         sudo chown -R "$LINUX_USER:$LINUX_USER" "$PROJECT_ROOT" || { print_warning "Could not change ownership of $PROJECT_ROOT to $LINUX_USER. Manual intervention might be needed for permissions."; }
         print_success "Repository cloned successfully."
     fi
@@ -228,13 +238,26 @@ deploy_backend() {
     cd "$BACKEND_DIR" || { print_error "Backend directory not found: $BACKEND_DIR"; exit 1; }
 
     print_info "Creating and activating Python virtual environment..."
+    # Use the discovered Python executable
     python3 -m venv venv || { print_error "Failed to create virtual environment."; exit 1; }
     source venv/bin/activate || { print_error "Failed to activate virtual environment."; exit 1; }
     print_success "Virtual environment activated."
     sleep 1
 
     print_info "Installing Python dependencies (Flask etc.)..."
-    pip install pyrogram flask[async] requests flask_cors psutil netifaces  || { print_error "Failed to install Python dependencies."; exit 1; }
+    # Install netifaces with required build dependencies if needed
+    pip install pyrogram flask[async] requests flask_cors psutil || { print_error "Failed to install Python dependencies."; exit 1; }
+    print_info "Attempting to install netifaces specifically, including build dependencies..."
+    
+    # Try installing netifaces with potential build dependencies for different distros
+    if command -v apt &> /dev/null; then
+        sudo apt install -y python3-netifaces || pip install netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-dev installations."; exit 1; }
+    elif command -v yum &> /dev/null; then
+        sudo yum install -y python3-netifaces || pip install netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-devel installations."; exit 1; }
+    else
+        pip install netifaces || { print_error "Failed to install netifaces. Please install it manually with appropriate system headers if needed."; exit 1; }
+    fi
+
     print_success "Python dependencies installed."
     sleep 1
 
@@ -602,7 +625,18 @@ run_update() {
     print_info "--- Updating Backend Dependencies ---"
     cd "$BACKEND_DIR" || { print_error "Backend directory not found: $BACKEND_DIR"; exit 1; }
     source venv/bin/activate || { print_error "Failed to activate virtual environment. Cannot update backend dependencies."; exit 1; }
-    pip install -r requirements.txt || { print_warning "Failed to install Python dependencies from requirements.txt. Attempting direct install..."; pip install pyrogram flask[async] requests flask_cors psutil netifaces || { print_error "Failed to install Python dependencies directly."; exit 1; }; }
+    pip install -r requirements.txt || { print_warning "Failed to install Python dependencies from requirements.txt. Attempting direct install..."; pip install pyrogram flask[async] requests flask_cors psutil || { print_error "Failed to install Python dependencies directly."; exit 1; }; }
+    
+    # Re-attempt netifaces installation during update
+    print_info "Attempting to install netifaces specifically during update..."
+    if command -v apt &> /dev/null; then
+        sudo apt install -y python3-netifaces || pip install netifaces || print_warning "Failed to install netifaces during update. Manual intervention might be needed."
+    elif command -v yum &> /dev/null; then
+        sudo yum install -y python3-netifaces || pip install netifaces || print_warning "Failed to install netifaces during update. Manual intervention might be needed."
+    else
+        pip install netifaces || print_warning "Failed to install netifaces during update. Please install it manually with appropriate system headers if needed."
+    fi
+
     deactivate
     print_success "Backend dependencies updated."
     sleep 1
