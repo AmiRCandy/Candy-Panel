@@ -78,7 +78,7 @@ buy_traffic_type_keyboard = InlineKeyboardMarkup([
 
 # --- Handlers ---
 
-@Client.on_message(filters.command("start"))
+@app.on_message(filters.command("start"))
 async def start_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     username = message.from_user.username if message.from_user.username else message.from_user.first_name
@@ -95,7 +95,7 @@ async def start_command(client: Client, message: Message):
     else:
         await message.reply_text(f"Error registering you: {response.get('message', 'Unknown error')}")
 
-@Client.on_message(filters.command("adminlogin"))
+@app.on_message(filters.command("adminlogin"))
 async def admin_login_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     
@@ -135,7 +135,7 @@ async def admin_login_command(client: Client, message: Message):
     else:
         await message.reply_text("You are not authorized to use admin commands.")
 
-@Client.on_callback_query()
+@app.on_callback_query()
 async def callback_query_handler(client: Client, callback_query):
     data = callback_query.data
     telegram_id = callback_query.from_user.id
@@ -329,7 +329,7 @@ async def callback_query_handler(client: Client, callback_query):
         await message.edit_text("You are not authorized to perform this action.")
 
 
-@Client.on_message(filters.text & filters.private & ~filters.command(["start", "adminlogin", "bought", "support", "approve", "reject", "ban", "unban", "update_traffic", "update_time", "broadcast", "cp_new_client", "cp_edit_client", "cp_delete_client", "cp_get_config", "cp_new_interface", "cp_edit_interface", "cp_delete_interface", "cp_change_setting", "cp_trigger_sync"]))
+@app.on_message(filters.text & filters.private & ~filters.command(["start", "adminlogin", "bought", "support", "approve", "reject", "ban", "unban", "update_traffic", "update_time", "broadcast", "cp_new_client", "cp_edit_client", "cp_delete_client", "cp_get_config", "cp_new_interface", "cp_edit_interface", "cp_delete_interface", "cp_change_setting", "cp_trigger_sync"]))
 async def handle_quantity_input(client: Client, message: Message):
     telegram_id = message.from_user.id
     current_state = user_states.get(telegram_id)
@@ -424,7 +424,7 @@ async def handle_quantity_input(client: Client, message: Message):
         await message.reply_text("I'm not sure how to respond to that. Please use the menu buttons or /start.", reply_markup=user_menu_keyboard)
 
 
-@Client.on_message(filters.command("bought") & filters.private)
+@app.on_message(filters.command("bought") & filters.private)
 async def handle_bought_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     
@@ -491,7 +491,7 @@ async def handle_bought_command(client: Client, message: Message):
         if telegram_id in user_states:
             del user_states[telegram_id] # Always clear state after /bought command
 
-@Client.on_message(filters.command("support") & filters.private)
+@app.on_message(filters.command("support") & filters.private)
 async def handle_support_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     support_message = message.text.split(maxsplit=1)
@@ -513,7 +513,7 @@ async def handle_support_command(client: Client, message: Message):
     else:
         await message.reply_text(f"Error sending support message: {response.get('message', 'Unknown error')}")
 
-@Client.on_message(filters.command("approve") & filters.private)
+@app.on_message(filters.command("approve") & filters.private)
 async def admin_approve_transaction_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     parts = message.text.split(maxsplit=2)
@@ -557,7 +557,7 @@ async def admin_approve_transaction_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("reject") & filters.private)
+@app.on_message(filters.command("reject") & filters.private)
 async def admin_reject_transaction_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     parts = message.text.split(maxsplit=2)
@@ -588,7 +588,7 @@ async def admin_reject_transaction_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("ban") & filters.private)
+@app.on_message(filters.command("ban") & filters.private)
 async def admin_ban_user_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     parts = message.text.split(maxsplit=1)
@@ -608,7 +608,7 @@ async def admin_ban_user_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("unban") & filters.private)
+@app.on_message(filters.command("unban") & filters.private)
 async def admin_unban_user_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     parts = message.text.split(maxsplit=1)
@@ -628,7 +628,7 @@ async def admin_unban_user_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("update_traffic") & filters.private)
+@app.on_message(filters.command("update_traffic") & filters.private)
 async def admin_update_traffic_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     parts = message.text.split(maxsplit=2)
@@ -650,7 +650,7 @@ async def admin_update_traffic_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("update_time") & filters.private)
+@app.on_message(filters.command("update_time") & filters.private)
 async def admin_update_time_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     parts = message.text.split(maxsplit=2)
@@ -672,7 +672,7 @@ async def admin_update_time_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("broadcast") & filters.private)
+@app.on_message(filters.command("broadcast") & filters.private)
 async def admin_broadcast_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     broadcast_message = message.text.split(maxsplit=1)
@@ -703,7 +703,7 @@ async def admin_broadcast_command(client: Client, message: Message):
 
 
 # --- CandyPanel API Passthrough Commands (Admin Only) ---
-@Client.on_message(filters.command("cp_new_client") & filters.private)
+@app.on_message(filters.command("cp_new_client") & filters.private)
 async def cp_new_client_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -736,7 +736,7 @@ async def cp_new_client_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("cp_edit_client") & filters.private)
+@app.on_message(filters.command("cp_edit_client") & filters.private)
 async def cp_edit_client_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -766,7 +766,7 @@ async def cp_edit_client_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("cp_delete_client") & filters.private)
+@app.on_message(filters.command("cp_delete_client") & filters.private)
 async def cp_delete_client_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -788,7 +788,7 @@ async def cp_delete_client_command(client: Client, message: Message):
     })
     await message.reply_text(response.get('message', 'Unknown error'))
 
-@Client.on_message(filters.command("cp_get_config") & filters.private)
+@app.on_message(filters.command("cp_get_config") & filters.private)
 async def cp_get_config_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -812,7 +812,7 @@ async def cp_get_config_command(client: Client, message: Message):
     if response.get('success') and response['data'].get('config'):
         await message.reply_text(f"Client config for {name}:\n```\n{response['data']['config']}\n```")
 
-@Client.on_message(filters.command("cp_new_interface") & filters.private)
+@app.on_message(filters.command("cp_new_interface") & filters.private)
 async def cp_new_interface_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -839,7 +839,7 @@ async def cp_new_interface_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("cp_edit_interface") & filters.private)
+@app.on_message(filters.command("cp_edit_interface") & filters.private)
 async def cp_edit_interface_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -870,7 +870,7 @@ async def cp_edit_interface_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("cp_delete_interface") & filters.private)
+@app.on_message(filters.command("cp_delete_interface") & filters.private)
 async def cp_delete_interface_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -896,7 +896,7 @@ async def cp_delete_interface_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"An unexpected error occurred: {e}")
 
-@Client.on_message(filters.command("cp_change_setting") & filters.private)
+@app.on_message(filters.command("cp_change_setting") & filters.private)
 async def cp_change_setting_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -919,7 +919,7 @@ async def cp_change_setting_command(client: Client, message: Message):
     })
     await message.reply_text(response.get('message', 'Unknown error'))
 
-@Client.on_message(filters.command("cp_trigger_sync") & filters.private)
+@app.on_message(filters.command("cp_trigger_sync") & filters.private)
 async def cp_trigger_sync_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
