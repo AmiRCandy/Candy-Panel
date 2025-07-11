@@ -251,9 +251,11 @@ deploy_backend() {
     
     # Try installing netifaces with potential build dependencies for different distros
     if command -v apt &> /dev/null; then
-        sudo apt install -y python3-netifaces || pip install netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-dev installations."; exit 1; }
+        sudo apt install -y python3-netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-dev installations."; exit 1; }
+        pip install netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-dev installations."; exit 1; }
     elif command -v yum &> /dev/null; then
-        sudo yum install -y python3-netifaces || pip install netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-devel installations."; exit 1; }
+        sudo yum install -y python3-netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-devel installations."; exit 1; }
+        pip install netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-dev installations."; exit 1; }
     else
         pip install netifaces || { print_error "Failed to install netifaces. Please install it manually with appropriate system headers if needed."; exit 1; }
     fi
