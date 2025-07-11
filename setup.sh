@@ -246,7 +246,7 @@ deploy_backend() {
 
     print_info "Installing Python dependencies (Flask etc.)..."
     # Install netifaces with required build dependencies if needed
-    pip install pyrogram flask[async] requests flask_cors psutil || { print_error "Failed to install Python dependencies."; exit 1; }
+    pip install pyrogram flask[async] requests flask_cors psutil httpx || { print_error "Failed to install Python dependencies."; exit 1; }
     print_info "Attempting to install netifaces specifically, including build dependencies..."
     
     # Try installing netifaces with potential build dependencies for different distros
