@@ -9,15 +9,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 # --- Configuration ---
 UNIFIED_API_URL = F"http://127.0.0.1:{os.environ.get('AP_PORT',3446)}"
 
-API_ID = os.environ.get("TELEGRAM_API_ID")
-API_HASH = os.environ.get("TELEGRAM_API_HASH")
-
-if not API_ID or not API_HASH:
-    print("ERROR: TELEGRAM_API_ID and TELEGRAM_API_HASH environment variables are not set.")
-    print("Please get them from my.telegram.org and set them before running the bot.")
-    exit(1)
-
-BOT_TOKEN = None # Will be fetched dynamically
 
 user_states = {} # {telegram_id: {"step": "await_amount_type" | "await_quantity" | "await_custom_plan_input" | "await_order_id", "purchase_type": "gb" | "month" | "custom", "quantity": int | float, "time_quantity": int | float, "traffic_quantity": int | float, "calculated_price": float }}
 
@@ -39,30 +30,31 @@ async def call_unified_api(endpoint: str, payload: dict):
         print(f"[-] Unexpected error calling unified API {endpoint}: {e}")
         return {"success": False, "message": f"Unexpected error: {e}"}
 
-def get_bot_token_from_unified_api():
+def get_bot_token_api_from_unified_api():
     """Fetches the bot token from the unified API's settings."""
     try:
         from db import SQLite
         db = SQLite()
         token_setting = db.get('settings', where={'key': 'telegram_bot_token'})
-        return token_setting['value'] if token_setting else None
+        api_id = db.get('settings', where={'key': 'telegram_api_id'})
+        api_hash = db.get('settings', where={'key': 'telegram_api_hash'})
+        return token_setting['value'] if token_setting else None , api_id['value'] if api_id else None, api_hash['value'] if api_hash else None
     except Exception as e:
         print(f"Error fetching bot token from unified API: {e}")
         return None
 
 # --- Pyrogram Client Initialization ---
 def init_pyrogram_client():
-    global BOT_TOKEN
-    BOT_TOKEN = get_bot_token_from_unified_api()
-    if not BOT_TOKEN or BOT_TOKEN == 'YOUR_TELEGRAM_BOT_TOKEN':
+    btoken,bapiid,bapihash = get_bot_token_api_from_unified_api()
+    if (not btoken or btoken == 'YOUR_TELEGRAM_BOT_TOKEN') or (not bapiid or bapiid == 'YOUR_TELEGRAM_API_ID') or (not bapihash or bapihash == 'YOUR_TELEGRAM_API_HASH') :
         print("ERROR: Telegram bot token not found or is default. Please configure it in CandyPanel.db via main.py settings.")
         exit(1)
 
     app = Client(
         "candy_panel_bot",
-        api_id=API_ID,
-        api_hash=API_HASH,
-        bot_token=BOT_TOKEN
+        api_id=bapiid,
+        api_hash=bapihash,
+        bot_token=btoken
     )
     return app
 
