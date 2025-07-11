@@ -3,7 +3,7 @@ import httpx
 import json
 import os
 import re
-from pyrogram import Client, filters 
+from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
 # --- Configuration ---
@@ -325,13 +325,13 @@ def get_bot_token_api_from_unified_api():
     """Fetches the bot token from the unified API's settings."""
     try:
         # Import here to avoid circular dependency
-        from db import SQLite 
+        from db import SQLite
         db = SQLite()
         token_setting = db.get('settings', where={'key': 'telegram_bot_token'})
         api_id = db.get('settings', where={'key': 'telegram_api_id'})
         api_hash = db.get('settings', where={'key': 'telegram_api_hash'})
-        return (token_setting['value'] if token_setting else None, 
-                api_id['value'] if api_id else None, 
+        return (token_setting['value'] if token_setting else None,
+                api_id['value'] if api_id else None,
                 api_hash['value'] if api_hash else None)
     except Exception as e:
         print(f"Error fetching bot token from unified API: {e}")
@@ -381,112 +381,228 @@ language_selection_keyboard = InlineKeyboardMarkup([
     [InlineKeyboardButton("فارسی 🇮🇷", callback_data="lang_fa")]
 ])
 
-# --- Handlers ---
-
-@app.on_message(filters.command("start"))
-async def start_command(client: Client, message: Message):
+# --- Single Message Handler ---
+@app.on_message(filters.text & filters.private)
+async def handle_all_messages(client: Client, message: Message):
     telegram_id = message.from_user.id
-    username = message.from_user.username if message.from_user.username else message.from_user.first_name
+    current_state = user_states.get(telegram_id)
+    text = message.text
 
-    # Register user with unified API and get initial language
-    response = await call_unified_api("/bot_api/user/register", {"telegram_id": telegram_id})
+    if text.startswith("/start"):
+        username = message.from_user.username if message.from_user.username else message.from_user.first_name
+        response = await call_unified_api("/bot_api/user/register", {"telegram_id": telegram_id})
 
-    if response.get('success'):
-        user_lang = response['data'].get('language', 'en')
-        user_languages[telegram_id] = user_lang # Store language in memory
-        await message.reply_text(
-            _(telegram_id, "welcome", username=username),
-            reply_markup=language_selection_keyboard # Always ask for language on start for flexibility
-        )
-    else:
-        # Fallback to English if registration fails for some reason
-        user_languages[telegram_id] = 'en' 
-        await message.reply_text(f"Error registering you: {response.get('message', 'Unknown error')}")
-
-
-@app.on_message(filters.command("adminlogin"))
-async def admin_login_command(client: Client, message: Message):
-    telegram_id = message.from_user.id
-    
-    # Get admin ID from unified API
-    admin_check_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id}) 
-    admin_telegram_id = admin_check_resp.get('data', {}).get('admin_telegram_id')
-
-    if str(telegram_id) == admin_telegram_id:
-        # Fetch dashboard data
-        dashboard_resp = await call_unified_api("/api/data", {}) 
-        
-        status_message = _(telegram_id, "admin_login_success") + "\n\n"
-        if dashboard_resp.get('success') and 'dashboard' in dashboard_resp.get('data', {}):
-            dashboard = dashboard_resp['data']['dashboard']
-            
-            status_message += _(telegram_id, "admin_server_status") + "\n"
-            status_message += _(telegram_id, "admin_cpu_usage", cpu=dashboard.get('cpu', 'N/A')) + "\n"
-            status_message += _(telegram_id, "admin_mem_usage", mem_usage=dashboard.get('mem', {}).get('usage', 'N/A')) + "\n"
-            status_message += _(telegram_id, "admin_clients_count", clients_count=dashboard.get('clients_count', 'N/A')) + "\n"
-            status_message += _(telegram_id, "admin_uptime", uptime=dashboard.get('uptime', 'N/A')) + "\n"
-            status_message += _(telegram_id, "admin_download", download=dashboard.get('net', {}).get('download', 'N/A')) + "\n"
-            status_message += _(telegram_id, "admin_upload", upload=dashboard.get('net', {}).get('upload', 'N/A')) + "\n"
-            status_message += _(telegram_id, "admin_overall_status", status=dashboard.get('status', 'N/A')) + "\n"
-            
-            if dashboard.get('alert'):
-                try:
-                    # Alerts from core.py are now a JSON list of strings
-                    alerts = json.loads(dashboard['alert']) 
-                    if alerts:
-                        status_message += "\n" + _(telegram_id, "admin_alerts", alerts="\n".join(alerts))
-                except (json.JSONDecodeError, TypeError):
-                    status_message += f"\n🚨 **Alert:** {dashboard['alert']}\n" # Fallback if not valid JSON
-            
+        if response.get('success'):
+            user_lang = response['data'].get('language', 'en')
+            user_languages[telegram_id] = user_lang
+            await message.reply_text(
+                _(telegram_id, "welcome", username=username),
+                reply_markup=language_selection_keyboard
+            )
         else:
-            status_message += _(telegram_id, "admin_error_status")
+            user_languages[telegram_id] = 'en'
+            await message.reply_text(f"Error registering you: {response.get('message', 'Unknown error')}")
+        return
 
-        await message.reply_text(status_message, reply_markup=admin_menu_keyboard)
+    elif text.startswith("/adminlogin"):
+        await handle_admin_login_command(client, message)
+        return
+
+    elif text.startswith("/bought"):
+        await handle_bought_command(client, message)
+        return
+
+    elif text.startswith("/support"):
+        await handle_support_command(client, message)
+        return
+
+    # Admin commands
+    elif text.startswith("/approve"):
+        await admin_approve_transaction_command(client, message)
+        return
+    elif text.startswith("/reject"):
+        await admin_reject_transaction_command(client, message)
+        return
+    elif text.startswith("/ban"):
+        await admin_ban_user_command(client, message)
+        return
+    elif text.startswith("/unban"):
+        await admin_unban_user_command(client, message)
+        return
+    elif text.startswith("/update_traffic"):
+        await admin_update_traffic_command(client, message)
+        return
+    elif text.startswith("/update_time"):
+        await admin_update_time_command(client, message)
+        return
+    elif text.startswith("/broadcast"):
+        await admin_broadcast_command(client, message)
+        return
+    elif text.startswith("/cp_"): # Catch all CandyPanel API commands
+        await handle_cp_command(client, message)
+        return
+
+    # Handle state-based inputs (quantity, custom plan)
+    if current_state:
+        if current_state["step"] == "await_quantity":
+            try:
+                quantity = float(text.strip())
+                if quantity <= 0:
+                    await message.reply_text(_(telegram_id, "invalid_quantity"))
+                    return
+
+                current_state["quantity"] = quantity
+                purchase_type = current_state["purchase_type"]
+
+                response = await call_unified_api("/bot_api/user/calculate_price", {
+                    "telegram_id": telegram_id,
+                    "purchase_type": purchase_type,
+                    "quantity": quantity
+                })
+
+                if response.get('success'):
+                    calculated_amount = response['data']['calculated_amount']
+                    current_state["calculated_price"] = calculated_amount
+                    current_state["step"] = "await_order_id"
+
+                    await message.reply_text(
+                        _(telegram_id, "price_summary",
+                          quantity=quantity,
+                          purchase_type=purchase_type.upper(),
+                          calculated_amount=calculated_amount)
+                    )
+                else:
+                    if "Price per" in response.get('message', '') and "not configured" in response.get('message', ''):
+                         await message.reply_text(_(telegram_id, "contact_support_price_config"))
+                    else:
+                        await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
+                    if telegram_id in user_states:
+                        del user_states[telegram_id]
+            except ValueError:
+                await message.reply_text(_(telegram_id, "invalid_quantity"))
+            except Exception as e:
+                await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
+                if telegram_id in user_states:
+                    del user_states[telegram_id]
+
+        elif current_state["step"] == "await_custom_plan_input":
+            text_input = text.strip().lower()
+            time_match = re.search(r'(\d+)\s*(month|months|mah|maah)', text_input)
+            traffic_match = re.search(r'(\d+)\s*(gb|gigs|gig)', text_input)
+
+            time_qty = float(time_match.group(1)) if time_match else 0
+            traffic_qty = float(traffic_match.group(1)) if traffic_match else 0
+
+            if time_qty == 0 and traffic_qty == 0:
+                await message.reply_text(_(telegram_id, "invalid_custom_format"))
+                return
+
+            current_state["time_quantity"] = time_qty
+            current_state["traffic_quantity"] = traffic_qty
+            current_state["purchase_type"] = "custom"
+
+            response = await call_unified_api("/bot_api/user/calculate_price", {
+                "telegram_id": telegram_id,
+                "purchase_type": "custom",
+                "time_quantity": time_qty,
+                "traffic_quantity": traffic_qty
+            })
+
+            if response.get('success'):
+                calculated_amount = response['data']['calculated_amount']
+                current_state["calculated_price"] = calculated_amount
+                current_state["step"] = "await_order_id"
+
+                await message.reply_text(
+                    _(telegram_id, "price_summary_custom",
+                      time_qty=time_qty,
+                      traffic_qty=traffic_qty,
+                      calculated_amount=calculated_amount)
+                )
+            else:
+                if "Price for" in response.get('message', '') and "not configured" in response.get('message', ''):
+                     await message.reply_text(_(telegram_id, "contact_support_price_config"))
+                else:
+                    await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
+                if telegram_id in user_states:
+                    del user_states[telegram_id]
+        else:
+            # If a user is in a state, but sends a non-command, non-expected-input message
+            await message.reply_text(_(telegram_id, "main_menu_prompt"), reply_markup=get_user_menu_keyboard(telegram_id))
+
     else:
-        await message.reply_text(_(telegram_id, "admin_unauthorized"))
+        # If no active state and not a recognized command
+        await message.reply_text(_(telegram_id, "main_menu_prompt"), reply_markup=get_user_menu_keyboard(telegram_id))
 
+
+# --- Single Callback Query Handler ---
 @app.on_callback_query()
-async def callback_query_handler(client: Client, callback_query):
+async def handle_all_callback_queries(client: Client, callback_query):
     data = callback_query.data
     telegram_id = callback_query.from_user.id
     message = callback_query.message
 
-    # Handle language selection first
+    # Handle language selection
     if data.startswith("lang_"):
         chosen_lang = data.split("_")[1]
         response = await call_unified_api("/bot_api/user/set_language", {"telegram_id": telegram_id, "language": chosen_lang})
         if response.get('success'):
             user_languages[telegram_id] = chosen_lang
-            await message.edit_text(
-                _(telegram_id, "language_changed") if chosen_lang == 'en' else LANGUAGES['fa']['language_changed'], 
-                reply_markup=get_user_menu_keyboard(telegram_id)
-            )
+            # Check if the message content or reply_markup is actually different before editing
+            new_text = _(telegram_id, "language_changed")
+            new_markup = get_user_menu_keyboard(telegram_id)
+
+            # Prevent MESSAGE_NOT_MODIFIED error
+            if message.text != new_text or message.reply_markup != new_markup:
+                await message.edit_text(new_text, reply_markup=new_markup)
+            else:
+                # If no change, acknowledge without editing
+                await callback_query.answer(_(telegram_id, "language_changed"))
         else:
             await message.edit_text(f"Error changing language: {response.get('message', 'Unknown error')}", reply_markup=get_user_menu_keyboard(telegram_id))
         return
 
     # Clear user state if they click a main menu button after being in a multi-step flow
-    if data in ["buy_traffic", "get_license", "account_status", "call_support", "change_language",
-                "admin_manage_users", "admin_manage_transactions", "admin_send_broadcast", "admin_server_control"]:
+    main_menu_buttons = ["buy_traffic", "get_license", "account_status", "call_support", "change_language"]
+    admin_menu_buttons = ["admin_manage_users", "admin_manage_transactions", "admin_send_broadcast", "admin_server_control"]
+
+    if data in main_menu_buttons + admin_menu_buttons:
         if telegram_id in user_states:
             del user_states[telegram_id]
-        
-        # If it's a main menu button, refresh the keyboard
-        if data in ["buy_traffic", "get_license", "account_status", "call_support", "change_language"]:
-            await message.edit_reply_markup(reply_markup=get_user_menu_keyboard(telegram_id))
+
+        # Check admin status for admin actions before attempting to edit with admin keyboard
+        is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
+        is_admin = is_admin_resp.get('data', {}).get('is_admin', False)
+
+        # Update reply markup only if it's different to avoid MessageNotModified
+        if data in main_menu_buttons:
+            current_markup = message.reply_markup
+            expected_markup = get_user_menu_keyboard(telegram_id)
+            if str(current_markup) != str(expected_markup): # Compare string representation of markup
+                try:
+                    await message.edit_reply_markup(reply_markup=expected_markup)
+                except Exception as e:
+                    print(f"Error editing user menu markup: {e}")
+        elif data in admin_menu_buttons and is_admin:
+            current_markup = message.reply_markup
+            expected_markup = admin_menu_keyboard
+            if str(current_markup) != str(expected_markup):
+                try:
+                    await message.edit_reply_markup(reply_markup=expected_markup)
+                except Exception as e:
+                    print(f"Error editing admin menu markup: {e}")
+        # Acknowledge the callback query immediately to prevent "Loading..."
+        await callback_query.answer()
 
 
-    # Check admin status for admin actions
-    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
-    is_admin = is_admin_resp.get('data', {}).get('is_admin', False)
-
+    # Handle user actions
     if data == "buy_traffic":
         response = await call_unified_api("/bot_api/user/initiate_purchase", {"telegram_id": telegram_id})
         if response.get('success'):
             admin_card_number = response['data']['admin_card_number']
             prices = response['data']['prices']
             price_text = "\n".join([f"- {k}: {v} (Toman)" for k, v in prices.items()])
-            
+
             await message.edit_text(
                 _(telegram_id, "purchase_card_info", admin_card_number=admin_card_number, price_text=price_text),
                 reply_markup=get_buy_traffic_type_keyboard(telegram_id)
@@ -498,7 +614,7 @@ async def callback_query_handler(client: Client, callback_query):
     elif data == "buy_by_gb":
         user_states[telegram_id] = {"step": "await_quantity", "purchase_type": "gb"}
         await message.edit_text(_(telegram_id, "prompt_gb_quantity"))
-    
+
     elif data == "buy_by_month":
         user_states[telegram_id] = {"step": "await_quantity", "purchase_type": "month"}
         await message.edit_text(_(telegram_id, "prompt_month_quantity"))
@@ -513,7 +629,6 @@ async def callback_query_handler(client: Client, callback_query):
             config = response['data']['config']
             await message.edit_text(_(telegram_id, "license_config_ready", config=config))
         else:
-            # Provide more user-friendly messages for license errors
             if "You don't have an active license yet" in response.get('message', ''):
                 await message.edit_text(_(telegram_id, "license_not_active"), reply_markup=get_user_menu_keyboard(telegram_id))
             else:
@@ -525,7 +640,7 @@ async def callback_query_handler(client: Client, callback_query):
             status_data = response['data']
             used_traffic_bytes = status_data.get('used_traffic_bytes', 0)
             traffic_limit_bytes = status_data.get('traffic_limit_bytes', 0)
-            
+
             used_traffic_gb = used_traffic_bytes / (1024**3)
             traffic_limit_gb = traffic_limit_bytes / (1024**3)
 
@@ -536,7 +651,7 @@ async def callback_query_handler(client: Client, callback_query):
             status_text += _(telegram_id, "used_traffic_line", used_traffic_gb=used_traffic_gb, traffic_limit_gb=traffic_limit_gb) + "\n"
             status_text += _(telegram_id, "bought_time_line", time_bought_days=status_data['time_bought_days']) + "\n"
             status_text += _(telegram_id, "expires_line", expires=status_data.get('expires', _(telegram_id, "N/A"))) + "\n"
-            
+
             if status_data.get('note'):
                 status_text += _(telegram_id, "note_line", note=status_data['note'])
 
@@ -549,9 +664,12 @@ async def callback_query_handler(client: Client, callback_query):
 
     elif data == "change_language":
         await message.edit_text(_(telegram_id, "choose_language"), reply_markup=language_selection_keyboard)
-    
+
     # --- Admin Callbacks ---
-    elif is_admin:
+    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
+    is_admin = is_admin_resp.get('data', {}).get('is_admin', False)
+
+    if is_admin:
         if data == "admin_manage_users":
             response = await call_unified_api("/bot_api/admin/get_all_users", {"telegram_id": telegram_id})
             if response.get('success'):
@@ -559,10 +677,10 @@ async def callback_query_handler(client: Client, callback_query):
                 if not users:
                     await message.edit_text(_(telegram_id, "admin_no_users"))
                     return
-                
+
                 user_list_text = _(telegram_id, "admin_manage_users_title")
                 for user in users:
-                    user_list_text += _(telegram_id, "admin_user_details", 
+                    user_list_text += _(telegram_id, "admin_user_details",
                                         telegram_id=user['telegram_id'],
                                         candy_client_name=user.get('candy_client_name', _(telegram_id, "N/A")),
                                         status=user['status'],
@@ -581,17 +699,17 @@ async def callback_query_handler(client: Client, callback_query):
                 if not transactions:
                     await message.edit_text(_(telegram_id, "admin_no_transactions"))
                     return
-                
+
                 trans_list_text = _(telegram_id, "admin_pending_transactions_title")
                 for trans in transactions:
                     purchase_details = ""
                     if trans.get('purchase_type') == 'custom':
-                        purchase_details = _(telegram_id, "admin_trans_details_custom", 
-                                             time_quantity=trans.get('time_quantity', 0), 
+                        purchase_details = _(telegram_id, "admin_trans_details_custom",
+                                             time_quantity=trans.get('time_quantity', 0),
                                              traffic_quantity=trans.get('traffic_quantity', 0))
                     else:
-                        purchase_details = _(telegram_id, "admin_trans_details_simple", 
-                                             purchase_type=trans.get('purchase_type', _(telegram_id, "N/A")).upper(), 
+                        purchase_details = _(telegram_id, "admin_trans_details_simple",
+                                             purchase_type=trans.get('purchase_type', _(telegram_id, "N/A")).upper(),
                                              quantity=trans.get('quantity', _(telegram_id, "N/A")))
 
                     trans_list_text += _(telegram_id, "admin_trans_item",
@@ -612,114 +730,60 @@ async def callback_query_handler(client: Client, callback_query):
         elif data == "admin_server_control":
             await message.edit_text(_(telegram_id, "admin_server_control_info"))
     else:
-        await message.edit_text(_(telegram_id, "admin_unauthorized"))
+        # If not admin and tries to click admin button, or clicks an unsupported button
+        # This part might not be strictly necessary if keyboard is correctly hidden/shown
+        # but as a fallback, it prevents silent failures.
+        pass # The initial check `is_admin_resp` already handles this in other functions.
+
+    # Always answer the callback query to remove the "loading" indicator
+    try:
+        await callback_query.answer()
+    except Exception as e:
+        print(f"Error answering callback query: {e}")
 
 
-@app.on_message(filters.text & filters.private & ~filters.command([
-    "start", "adminlogin", "bought", "support", "approve", "reject", "ban", 
-    "unban", "update_traffic", "update_time", "broadcast", "cp_new_client", 
-    "cp_edit_client", "cp_delete_client", "cp_get_config", "cp_new_interface", 
-    "cp_edit_interface", "cp_delete_interface", "cp_change_setting", "cp_trigger_sync"
-]))
-async def handle_quantity_input(client: Client, message: Message):
+# --- Command Handlers (called from single on_message) ---
+async def handle_admin_login_command(client: Client, message: Message):
     telegram_id = message.from_user.id
-    current_state = user_states.get(telegram_id)
 
-    if current_state and current_state["step"] == "await_quantity":
-        try:
-            quantity = float(message.text.strip())
-            if quantity <= 0:
-                await message.reply_text(_(telegram_id, "invalid_quantity"))
-                return
+    admin_check_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
+    admin_telegram_id = admin_check_resp.get('data', {}).get('admin_telegram_id')
 
-            current_state["quantity"] = quantity
-            purchase_type = current_state["purchase_type"]
+    if str(telegram_id) == admin_telegram_id:
+        dashboard_resp = await call_unified_api("/api/data", {})
 
-            # Call unified API to get the calculated price
-            response = await call_unified_api("/bot_api/user/calculate_price", {
-                "telegram_id": telegram_id,
-                "purchase_type": purchase_type,
-                "quantity": quantity
-            })
+        status_message = _(telegram_id, "admin_login_success") + "\n\n"
+        if dashboard_resp.get('success') and 'dashboard' in dashboard_resp.get('data', {}):
+            dashboard = dashboard_resp['data']['dashboard']
 
-            if response.get('success'):
-                calculated_amount = response['data']['calculated_amount']
-                current_state["calculated_price"] = calculated_amount
-                current_state["step"] = "await_order_id"
-                
-                await message.reply_text(
-                    _(telegram_id, "price_summary", 
-                      quantity=quantity, 
-                      purchase_type=purchase_type.upper(), 
-                      calculated_amount=calculated_amount)
-                )
-            else:
-                # Handle specific price config error from API
-                if "Price per" in response.get('message', '') and "not configured" in response.get('message', ''):
-                     await message.reply_text(_(telegram_id, "contact_support_price_config"))
-                else:
-                    await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-                if telegram_id in user_states:
-                    del user_states[telegram_id] # Clear state on error
-        except ValueError:
-            await message.reply_text(_(telegram_id, "invalid_quantity"))
-        except Exception as e:
-            await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
-            if telegram_id in user_states:
-                del user_states[telegram_id] # Clear state on error
-    
-    elif current_state and current_state["step"] == "await_custom_plan_input":
-        text_input = message.text.strip().lower()
-        time_match = re.search(r'(\d+)\s*(month|months|mah|maah)', text_input) # Added Persian 'mah' and 'maah'
-        traffic_match = re.search(r'(\d+)\s*(gb|gigs|gig)', text_input) # Added Persian 'gig'
+            status_message += _(telegram_id, "admin_server_status") + "\n"
+            status_message += _(telegram_id, "admin_cpu_usage", cpu=dashboard.get('cpu', 'N/A')) + "\n"
+            status_message += _(telegram_id, "admin_mem_usage", mem_usage=dashboard.get('mem', {}).get('usage', 'N/A')) + "\n"
+            status_message += _(telegram_id, "admin_clients_count", clients_count=dashboard.get('clients_count', 'N/A')) + "\n"
+            status_message += _(telegram_id, "admin_uptime", uptime=dashboard.get('uptime', 'N/A')) + "\n"
+            status_message += _(telegram_id, "admin_download", download=dashboard.get('net', {}).get('download', 'N/A')) + "\n"
+            status_message += _(telegram_id, "admin_upload", upload=dashboard.get('net', {}).get('upload', 'N/A')) + "\n"
+            status_message += _(telegram_id, "admin_overall_status", status=dashboard.get('status', 'N/A')) + "\n"
 
-        time_qty = float(time_match.group(1)) if time_match else 0
-        traffic_qty = float(traffic_match.group(1)) if traffic_match else 0
+            if dashboard.get('alert'):
+                try:
+                    alerts = json.loads(dashboard['alert'])
+                    if alerts:
+                        status_message += "\n" + _(telegram_id, "admin_alerts", alerts="\n".join(alerts))
+                except (json.JSONDecodeError, TypeError):
+                    status_message += f"\n🚨 **Alert:** {dashboard['alert']}\n"
 
-        if time_qty == 0 and traffic_qty == 0:
-            await message.reply_text(_(telegram_id, "invalid_custom_format"))
-            return
-
-        current_state["time_quantity"] = time_qty
-        current_state["traffic_quantity"] = traffic_qty
-        current_state["purchase_type"] = "custom" # Ensure type is set to custom
-
-        # Call unified API to get the calculated price for custom plan
-        response = await call_unified_api("/bot_api/user/calculate_price", {
-            "telegram_id": telegram_id,
-            "purchase_type": "custom",
-            "time_quantity": time_qty,
-            "traffic_quantity": traffic_qty
-        })
-
-        if response.get('success'):
-            calculated_amount = response['data']['calculated_amount']
-            current_state["calculated_price"] = calculated_amount
-            current_state["step"] = "await_order_id"
-            
-            await message.reply_text(
-                _(telegram_id, "price_summary_custom", 
-                  time_qty=time_qty, 
-                  traffic_qty=traffic_qty, 
-                  calculated_amount=calculated_amount)
-            )
         else:
-            # Handle specific price config error from API
-            if "Price for" in response.get('message', '') and "not configured" in response.get('message', ''):
-                 await message.reply_text(_(telegram_id, "contact_support_price_config"))
-            else:
-                await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-            if telegram_id in user_states:
-                del user_states[telegram_id] # Clear state on error
+            status_message += _(telegram_id, "admin_error_status")
+
+        await message.reply_text(status_message, reply_markup=admin_menu_keyboard)
     else:
-        # If not in a multi-step flow, or not the expected step, just ignore or prompt main menu
-        await message.reply_text(_(telegram_id, "main_menu_prompt"), reply_markup=get_user_menu_keyboard(telegram_id))
+        await message.reply_text(_(telegram_id, "admin_unauthorized"))
 
 
-@app.on_message(filters.command("bought") & filters.private)
 async def handle_bought_command(client: Client, message: Message):
     telegram_id = message.from_user.id
-    
+
     if telegram_id not in user_states or user_states[telegram_id]["step"] != "await_order_id":
         await message.reply_text(_(telegram_id, "bought_start_purchase"))
         return
@@ -730,17 +794,15 @@ async def handle_bought_command(client: Client, message: Message):
             await message.reply_text(_(telegram_id, "bought_usage", command_name="/bought", expected_args="<ORDER_ID>"))
             return
         order_id = parts[1]
-        
-        # Retrieve purchase details from user_states
+
         purchase_type = user_states[telegram_id]["purchase_type"]
         calculated_amount = user_states[telegram_id]["calculated_price"]
-        
-        # Prepare payload based on purchase type
+
         payload_data = {
             "telegram_id": telegram_id,
             "amount": calculated_amount,
             "order_id": order_id,
-            "card_number_sent": "User confirmed payment via bot", # More descriptive
+            "card_number_sent": "User confirmed payment via bot",
             "purchase_type": purchase_type
         }
 
@@ -754,15 +816,15 @@ async def handle_bought_command(client: Client, message: Message):
 
         if response.get('success'):
             admin_telegram_id = response['data']['admin_telegram_id']
-            
+
             purchase_summary = ""
             if purchase_type == 'gb' or purchase_type == 'month':
-                purchase_summary = _(telegram_id, "admin_trans_details_simple", 
-                                     purchase_type=purchase_type.upper(), 
+                purchase_summary = _(telegram_id, "admin_trans_details_simple",
+                                     purchase_type=purchase_type.upper(),
                                      quantity=user_states[telegram_id]['quantity'])
             elif purchase_type == 'custom':
-                purchase_summary = _(telegram_id, "admin_trans_details_custom", 
-                                     time_quantity=user_states[telegram_id]['time_quantity'], 
+                purchase_summary = _(telegram_id, "admin_trans_details_custom",
+                                     time_quantity=user_states[telegram_id]['time_quantity'],
                                      traffic_quantity=user_states[telegram_id]['traffic_quantity'])
 
             if admin_telegram_id != '0':
@@ -783,9 +845,9 @@ async def handle_bought_command(client: Client, message: Message):
         await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
     finally:
         if telegram_id in user_states:
-            del user_states[telegram_id] # Always clear state after /bought command
+            del user_states[telegram_id]
 
-@app.on_message(filters.command("support") & filters.private)
+
 async def handle_support_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     support_message = message.text.split(maxsplit=1)
@@ -812,7 +874,7 @@ async def handle_support_command(client: Client, message: Message):
     else:
         await message.reply_text(_(telegram_id, "error_support_send", message=response.get('message', 'Unknown error')))
 
-@app.on_message(filters.command("approve") & filters.private)
+
 async def admin_approve_transaction_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -842,17 +904,16 @@ async def admin_approve_transaction_command(client: Client, message: Message):
             new_traffic_gb = response['data'].get('new_traffic_gb', 0)
             new_time_days = response['data'].get('new_time_days', 0)
 
-            await message.reply_text(_(telegram_id, "transaction_approved", 
-                                       order_id=order_id, 
+            await message.reply_text(_(telegram_id, "transaction_approved",
+                                       order_id=order_id,
                                        client_name=client_name,
                                        new_traffic_gb=new_traffic_gb,
                                        new_time_days=new_time_days))
-            
-            # Send config to user
+
             if client_config:
                 await client.send_message(
                     chat_id=target_telegram_id,
-                    text=_(target_telegram_id, "purchase_approved_user") + 
+                    text=_(target_telegram_id, "purchase_approved_user") +
                          _(target_telegram_id, "license_config_ready", config=client_config)
                 )
             else:
@@ -866,7 +927,7 @@ async def admin_approve_transaction_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
 
-@app.on_message(filters.command("reject") & filters.private)
+
 async def admin_reject_transaction_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -901,7 +962,7 @@ async def admin_reject_transaction_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
 
-@app.on_message(filters.command("ban") & filters.private)
+
 async def admin_ban_user_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -929,7 +990,7 @@ async def admin_ban_user_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
 
-@app.on_message(filters.command("unban") & filters.private)
+
 async def admin_unban_user_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -957,7 +1018,7 @@ async def admin_unban_user_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
 
-@app.on_message(filters.command("update_traffic") & filters.private)
+
 async def admin_update_traffic_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -987,7 +1048,7 @@ async def admin_update_traffic_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
 
-@app.on_message(filters.command("update_time") & filters.private)
+
 async def admin_update_time_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -1017,7 +1078,7 @@ async def admin_update_time_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
 
-@app.on_message(filters.command("broadcast") & filters.private)
+
 async def admin_broadcast_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
@@ -1038,13 +1099,13 @@ async def admin_broadcast_command(client: Client, message: Message):
     if response.get('success'):
         target_user_ids = response['data']['target_user_ids']
         message_to_send = response['data']['message']
-        
+
         sent_count = 0
         for user_id in target_user_ids:
             try:
                 await client.send_message(chat_id=user_id, text=_(user_id, "broadcast_msg_prefix") + message_to_send)
                 sent_count += 1
-                time.sleep(0.2) # Small delay to avoid hitting Telegram API limits
+                time.sleep(0.2)
             except Exception as e:
                 print(f"Error sending broadcast to user {user_id}: {e}")
         await message.reply_text(_(telegram_id, "admin_broadcast_sent", sent_count=sent_count))
@@ -1053,272 +1114,141 @@ async def admin_broadcast_command(client: Client, message: Message):
 
 
 # --- CandyPanel API Passthrough Commands (Admin Only) ---
-# Each of these is wrapped with admin check and proper error handling/messages.
-@app.on_message(filters.command("cp_new_client") & filters.private)
-async def cp_new_client_command(client: Client, message: Message):
+async def handle_cp_command(client: Client, message: Message):
     telegram_id = message.from_user.id
     is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
     if not is_admin_resp.get('data', {}).get('is_admin', False):
         await message.reply_text(_(telegram_id, "admin_unauthorized"))
         return
 
-    parts = message.text.split(maxsplit=6)
-    if len(parts) < 5:
-        await message.reply_text(_(telegram_id, "cmd_usage_error", command_name="/cp_new_client", expected_args="<name> <expires_iso> <traffic_bytes> <wg_id> [note]"))
-        return
-    try:
-        name = parts[1]
-        expires = parts[2]
-        traffic = parts[3]
-        wg_id = int(parts[4])
-        note = parts[5] if len(parts) > 5 else ""
+    parts = message.text.split(maxsplit=6) # Maxsplit for cp_new_client with 6 parts, adjust as needed
+    command = parts[0]
+    resource = ""
+    action = ""
+    payload_data = {}
+    expected_args = ""
 
-        response = await call_unified_api("/bot_api/admin/server_control", {
-            "admin_telegram_id": telegram_id,
-            "resource": "client",
-            "action": "create",
-            "data": {"name": name, "expires": expires, "traffic": traffic, "wg_id": wg_id, "note": note}
-        })
-        if response.get('success'):
-            await message.reply_text(response.get('message', 'Success'))
-            if response['data'].get('client_config'):
-                await message.reply_text(f"Client config for {name}:\n```\n{response['data']['client_config']}\n```")
-        else:
-            await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-    except ValueError:
-        await message.reply_text(_(telegram_id, "invalid_id_format"))
-    except Exception as e:
-        await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
+    if command == "/cp_new_client":
+        resource = "client"
+        action = "create"
+        expected_args = "<name> <expires_iso> <traffic_bytes> [wg_id] [note]"
+        if len(parts) < 5:
+            await message.reply_text(_(telegram_id, "cmd_usage_error", command_name=command, expected_args=expected_args))
+            return
+        try:
+            payload_data = {"name": parts[1], "expires": parts[2], "traffic": parts[3], "wg_id": int(parts[4])}
+            if len(parts) > 5: payload_data["note"] = parts[5]
+        except ValueError:
+            await message.reply_text(_(telegram_id, "invalid_id_format"))
+            return
 
-@app.on_message(filters.command("cp_edit_client") & filters.private)
-async def cp_edit_client_command(client: Client, message: Message):
-    telegram_id = message.from_user.id
-    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
-    if not is_admin_resp.get('data', {}).get('is_admin', False):
-        await message.reply_text(_(telegram_id, "admin_unauthorized"))
-        return
+    elif command == "/cp_edit_client":
+        resource = "client"
+        action = "update"
+        expected_args = "<name> [expires_iso] [traffic_bytes] [status_bool] [note]"
+        if len(parts) < 2:
+            await message.reply_text(_(telegram_id, "cmd_usage_error", command_name=command, expected_args=expected_args))
+            return
+        payload_data = {"name": parts[1]}
+        if len(parts) > 2: payload_data["expires"] = parts[2]
+        if len(parts) > 3: payload_data["traffic"] = parts[3]
+        if len(parts) > 4: payload_data["status"] = True if parts[4].lower() == 'true' else False
+        if len(parts) > 5: payload_data["note"] = parts[5]
 
-    parts = message.text.split(maxsplit=5)
-    if len(parts) < 2:
-        await message.reply_text(_(telegram_id, "cmd_usage_error", command_name="/cp_edit_client", expected_args="<name> [expires_iso] [traffic_bytes] [status_bool] [note]"))
-        return
-    try:
-        name = parts[1]
-        edit_data = {"name": name}
-        if len(parts) > 2: edit_data["expires"] = parts[2]
-        if len(parts) > 3: edit_data["traffic"] = parts[3]
-        if len(parts) > 4: edit_data["status"] = True if parts[4].lower() == 'true' else False
-        if len(parts) > 5: edit_data["note"] = parts[5]
+    elif command == "/cp_delete_client":
+        resource = "client"
+        action = "delete"
+        expected_args = "<name>"
+        if len(parts) < 2:
+            await message.reply_text(_(telegram_id, "cmd_usage_error", command_name=command, expected_args=expected_args))
+            return
+        payload_data = {"name": parts[1]}
 
-        response = await call_unified_api("/bot_api/admin/server_control", {
-            "admin_telegram_id": telegram_id,
-            "resource": "client",
-            "action": "update",
-            "data": edit_data
-        })
-        if response.get('success'):
-            await message.reply_text(response.get('message', 'Success'))
-        else:
-            await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-    except Exception as e:
-        await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
+    elif command == "/cp_get_config":
+        resource = "client"
+        action = "get_config"
+        expected_args = "<name>"
+        if len(parts) < 2:
+            await message.reply_text(_(telegram_id, "cmd_usage_error", command_name=command, expected_args=expected_args))
+            return
+        payload_data = {"name": parts[1]}
 
-@app.on_message(filters.command("cp_delete_client") & filters.private)
-async def cp_delete_client_command(client: Client, message: Message):
-    telegram_id = message.from_user.id
-    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
-    if not is_admin_resp.get('data', {}).get('is_admin', False):
-        await message.reply_text(_(telegram_id, "admin_unauthorized"))
-        return
+    elif command == "/cp_new_interface":
+        resource = "interface"
+        action = "create"
+        expected_args = "<address_range> <port>"
+        if len(parts) < 3:
+            await message.reply_text(_(telegram_id, "cmd_usage_error", command_name=command, expected_args=expected_args))
+            return
+        try:
+            payload_data = {"address_range": parts[1], "port": int(parts[2])}
+        except ValueError:
+            await message.reply_text(_(telegram_id, "invalid_num_format"))
+            return
 
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.reply_text(_(telegram_id, "cmd_usage_error", command_name="/cp_delete_client", expected_args="<name>"))
-        return
-    
-    name = parts[1]
-    response = await call_unified_api("/bot_api/admin/server_control", {
-        "admin_telegram_id": telegram_id,
-        "resource": "client",
-        "action": "delete",
-        "data": {"name": name}
-    })
-    if response.get('success'):
-        await message.reply_text(response.get('message', 'Success'))
+    elif command == "/cp_edit_interface":
+        resource = "interface"
+        action = "update"
+        expected_args = "<name_wgX> [address] [port] [status_bool]"
+        if len(parts) < 2:
+            await message.reply_text(_(telegram_id, "cmd_usage_error", command_name=command, expected_args=expected_args))
+            return
+        payload_data = {"name": parts[1]}
+        if len(parts) > 2: payload_data["address"] = parts[2]
+        if len(parts) > 3:
+            try: payload_data["port"] = int(parts[3])
+            except ValueError: await message.reply_text(_(telegram_id, "invalid_num_format")); return
+        if len(parts) > 4: payload_data["status"] = True if parts[4].lower() == 'true' else False
+
+    elif command == "/cp_delete_interface":
+        resource = "interface"
+        action = "delete"
+        expected_args = "<wg_id>"
+        if len(parts) < 2:
+            await message.reply_text(_(telegram_id, "cmd_usage_error", command_name=command, expected_args=expected_args))
+            return
+        try:
+            payload_data = {"wg_id": int(parts[1])}
+        except ValueError:
+            await message.reply_text(_(telegram_id, "invalid_id_format"))
+            return
+
+    elif command == "/cp_change_setting":
+        resource = "setting"
+        action = "update"
+        expected_args = "<key> <value>"
+        if len(parts) < 3:
+            await message.reply_text(_(telegram_id, "cmd_usage_error", command_name=command, expected_args=expected_args))
+            return
+        payload_data = {"key": parts[1], "value": parts[2]}
+
+    elif command == "/cp_trigger_sync":
+        resource = "sync"
+        action = "trigger"
+
     else:
-        await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-
-@app.on_message(filters.command("cp_get_config") & filters.private)
-async def cp_get_config_command(client: Client, message: Message):
-    telegram_id = message.from_user.id
-    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
-    if not is_admin_resp.get('data', {}).get('is_admin', False):
-        await message.reply_text(_(telegram_id, "admin_unauthorized"))
+        await message.reply_text(_(telegram_id, "cmd_usage_error", command_name=command, expected_args="<command specific arguments>"))
         return
 
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.reply_text(_(telegram_id, "cmd_usage_error", command_name="/cp_get_config", expected_args="<name>"))
-        return
-    
-    name = parts[1]
-    response = await call_unified_api("/bot_api/admin/server_control", {
-        "admin_telegram_id": telegram_id,
-        "resource": "client",
-        "action": "get_config",
-        "data": {"name": name}
-    })
-    if response.get('success'):
-        await message.reply_text(response.get('message', 'Success'))
-        if response['data'].get('config'):
-            await message.reply_text(f"Client config for {name}:\n```\n{response['data']['config']}\n```")
-    else:
-        await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-
-@app.on_message(filters.command("cp_new_interface") & filters.private)
-async def cp_new_interface_command(client: Client, message: Message):
-    telegram_id = message.from_user.id
-    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
-    if not is_admin_resp.get('data', {}).get('is_admin', False):
-        await message.reply_text(_(telegram_id, "admin_unauthorized"))
-        return
-
-    parts = message.text.split(maxsplit=2)
-    if len(parts) < 3:
-        await message.reply_text(_(telegram_id, "cmd_usage_error", command_name="/cp_new_interface", expected_args="<address_range> <port>"))
-        return
     try:
-        address_range = parts[1]
-        port = int(parts[2])
         response = await call_unified_api("/bot_api/admin/server_control", {
             "admin_telegram_id": telegram_id,
-            "resource": "interface",
-            "action": "create",
-            "data": {"address_range": address_range, "port": port}
+            "resource": resource,
+            "action": action,
+            "data": payload_data
         })
         if response.get('success'):
             await message.reply_text(response.get('message', 'Success'))
+            if resource == "client" and action == "get_config" and response['data'].get('config'):
+                await message.reply_text(f"Client config for {payload_data['name']}:\n```\n{response['data']['config']}\n```")
+            elif resource == "client" and action == "create" and response['data'].get('client_config'):
+                await message.reply_text(f"Client config for {payload_data['name']}:\n```\n{response['data']['client_config']}\n```")
         else:
             await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-    except ValueError:
-        await message.reply_text(_(telegram_id, "invalid_num_format"))
     except Exception as e:
         await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
 
-@app.on_message(filters.command("cp_edit_interface") & filters.private)
-async def cp_edit_interface_command(client: Client, message: Message):
-    telegram_id = message.from_user.id
-    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
-    if not is_admin_resp.get('data', {}).get('is_admin', False):
-        await message.reply_text(_(telegram_id, "admin_unauthorized"))
-        return
-
-    parts = message.text.split(maxsplit=4)
-    if len(parts) < 2:
-        await message.reply_text(_(telegram_id, "cmd_usage_error", command_name="/cp_edit_interface", expected_args="<name_wgX> [address] [port] [status_bool]"))
-        return
-    try:
-        name = parts[1]
-        edit_data = {"name": name}
-        if len(parts) > 2: edit_data["address"] = parts[2]
-        if len(parts) > 3: edit_data["port"] = int(parts[3])
-        if len(parts) > 4: edit_data["status"] = True if parts[4].lower() == 'true' else False
-
-        response = await call_unified_api("/bot_api/admin/server_control", {
-            "admin_telegram_id": telegram_id,
-            "resource": "interface",
-            "action": "update",
-            "data": edit_data
-        })
-        if response.get('success'):
-            await message.reply_text(response.get('message', 'Success'))
-        else:
-            await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-    except ValueError:
-        await message.reply_text(_(telegram_id, "invalid_num_format"))
-    except Exception as e:
-        await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
-
-@app.on_message(filters.command("cp_delete_interface") & filters.private)
-async def cp_delete_interface_command(client: Client, message: Message):
-    telegram_id = message.from_user.id
-    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
-    if not is_admin_resp.get('data', {}).get('is_admin', False):
-        await message.reply_text(_(telegram_id, "admin_unauthorized"))
-        return
-
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.reply_text(_(telegram_id, "cmd_usage_error", command_name="/cp_delete_interface", expected_args="<wg_id>"))
-        return
-    try:
-        wg_id = int(parts[1])
-        response = await call_unified_api("/bot_api/admin/server_control", {
-            "admin_telegram_id": telegram_id,
-            "resource": "interface",
-            "action": "delete",
-            "data": {"wg_id": wg_id}
-        })
-        if response.get('success'):
-            await message.reply_text(response.get('message', 'Success'))
-        else:
-            await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-    except ValueError:
-        await message.reply_text(_(telegram_id, "invalid_id_format"))
-    except Exception as e:
-        await message.reply_text(_(telegram_id, "unexpected_error", error_message=str(e)))
-
-@app.on_message(filters.command("cp_change_setting") & filters.private)
-async def cp_change_setting_command(client: Client, message: Message):
-    telegram_id = message.from_user.id
-    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
-    if not is_admin_resp.get('data', {}).get('is_admin', False):
-        await message.reply_text(_(telegram_id, "admin_unauthorized"))
-        return
-
-    parts = message.text.split(maxsplit=2)
-    if len(parts) < 3:
-        await message.reply_text(_(telegram_id, "cmd_usage_error", command_name="/cp_change_setting", expected_args="<key> <value>"))
-        return
-    
-    key = parts[1]
-    value = parts[2]
-    response = await call_unified_api("/bot_api/admin/server_control", {
-        "admin_telegram_id": telegram_id,
-        "resource": "setting",
-        "action": "update",
-        "data": {"key": key, "value": value}
-    })
-    if response.get('success'):
-        await message.reply_text(response.get('message', 'Success'))
-        # Specific handling for telegram_bot_status to reflect immediate change
-        if key == 'telegram_bot_status':
-            if value == '1':
-                await message.reply_text(_(telegram_id, "bot_already_running"))
-            else:
-                await message.reply_text(_(telegram_id, "bot_already_stopped"))
-    else:
-        await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
-
-@app.on_message(filters.command("cp_trigger_sync") & filters.private)
-async def cp_trigger_sync_command(client: Client, message: Message):
-    telegram_id = message.from_user.id
-    is_admin_resp = await call_unified_api("/bot_api/admin/check_admin", {"telegram_id": telegram_id})
-    if not is_admin_resp.get('data', {}).get('is_admin', False):
-        await message.reply_text(_(telegram_id, "admin_unauthorized"))
-        return
-    
-    response = await call_unified_api("/bot_api/admin/server_control", {
-        "admin_telegram_id": telegram_id,
-        "resource": "sync",
-        "action": "trigger"
-    })
-    if response.get('success'):
-        await message.reply_text(response.get('message', 'Success'))
-    else:
-        await message.reply_text(_(telegram_id, "unexpected_error", error_message=response.get('message', 'Unknown error')))
 
 # --- Main Execution ---
 print("Bot started. Press Ctrl+C to exit.")
-# This is a blocking call, so it should be the last thing in the script.
 app.run()
