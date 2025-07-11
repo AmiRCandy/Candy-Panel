@@ -750,7 +750,7 @@ async def handle_admin_login_command(client: Client, message: Message):
     admin_telegram_id = admin_check_resp.get('data', {}).get('admin_telegram_id')
 
     if str(telegram_id) == admin_telegram_id:
-        dashboard_resp = await call_unified_api("/api/data", {})
+        dashboard_resp = await call_unified_api("/bot_api/admin/data", {})
 
         status_message = _(telegram_id, "admin_login_success") + "\n\n"
         if dashboard_resp.get('success') and 'dashboard' in dashboard_resp.get('data', {}):
