@@ -145,19 +145,7 @@ setup_permissions() {
 
     cat <<EOF | sudo tee "$SUDOERS_FILE" > /dev/null
 # Allow $CANDYPANEL_USER to manage WireGuard, UFW, systemctl, and cron for CandyPanel
-$CANDYPANEL_USER ALL=(ALL) NOPASSWD: \\
-    /usr/bin/wg genkey, \\
-    /usr/bin/wg pubkey, \\
-    /usr/bin/wg show *, \\
-    /usr/bin/wg syncconf *, \\
-    /usr/bin/wg-quick up *, \\
-    /usr/bin/wg-quick down *, \\
-    /usr/bin/systemctl enable wg-quick@*, \\
-    /usr/bin/systemctl start wg-quick@*, \\
-    /usr/bin/systemctl stop wg-quick@*, \\
-    /usr/sbin/ufw allow *, \\
-    /usr/sbin/ufw delete *, \\
-    /usr/bin/crontab
+$CANDYPANEL_USER ALL=(ALL) NOPASSWD: /usr/bin/wg genkey, /usr/bin/wg pubkey, /usr/bin/wg show *, /usr/bin/wg syncconf *, /usr/bin/wg-quick up *, /usr/bin/wg-quick down *, /usr/bin/systemctl enable wg-quick@*, /usr/bin/systemctl start wg-quick@*, /usr/bin/systemctl stop wg-quick@*, /usr/sbin/ufw allow *, /usr/sbin/ufw delete *, /usr/bin/crontab
 EOF
 
     sudo chmod 0440 "$SUDOERS_FILE" || { print_error "Failed to set permissions for sudoers file."; exit 1; }
@@ -246,7 +234,8 @@ deploy_backend() {
 
     print_info "Installing Python dependencies (Flask etc.)..."
     # Install netifaces with required build dependencies if needed
-    pip install pyrogram flask[async] requests flask_cors psutil httpx || { print_error "Failed to install Python dependencies."; exit 1; }
+
+    pip install pyrogram flask[async] requests flask_cors psutil httpx tgcrypto || { print_error "Failed to install Python dependencies."; exit 1; }
     print_info "Attempting to install netifaces specifically, including build dependencies..."
     
     # Try installing netifaces with potential build dependencies for different distros
