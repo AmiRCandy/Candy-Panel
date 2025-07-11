@@ -39,7 +39,7 @@ async def call_unified_api(endpoint: str, payload: dict):
         print(f"[-] Unexpected error calling unified API {endpoint}: {e}")
         return {"success": False, "message": f"Unexpected error: {e}"}
 
-async def get_bot_token_from_unified_api():
+def get_bot_token_from_unified_api():
     """Fetches the bot token from the unified API's settings."""
     try:
         from db import SQLite
@@ -51,9 +51,9 @@ async def get_bot_token_from_unified_api():
         return None
 
 # --- Pyrogram Client Initialization ---
-async def init_pyrogram_client():
+def init_pyrogram_client():
     global BOT_TOKEN
-    BOT_TOKEN = await get_bot_token_from_unified_api()
+    BOT_TOKEN = get_bot_token_from_unified_api()
     if not BOT_TOKEN or BOT_TOKEN == 'YOUR_TELEGRAM_BOT_TOKEN':
         print("ERROR: Telegram bot token not found or is default. Please configure it in CandyPanel.db via main.py settings.")
         exit(1)
