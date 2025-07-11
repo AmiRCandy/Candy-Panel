@@ -944,6 +944,10 @@ PersistentKeepalive = 25
 
         is_running = self._is_telegram_bot_running(current_pid)
 
+        # Get the path to the virtual environment's python interpreter
+        current_script_dir = os.path.dirname(os.path.abspath(__file__))
+        venv_python_path = os.path.join(current_script_dir, 'venv', 'bin', 'python3')
+
         if action == 'start':
             if is_running:
                 print(f"[*] Telegram bot (PID: {current_pid}) is already running.")
@@ -953,6 +957,7 @@ PersistentKeepalive = 25
                 bot_token_setting = self.db.get('settings', where={'key': 'telegram_bot_token'})
                 api_id_setting = self.db.get('settings', where={'key': 'telegram_api_id'})
                 api_hash_setting = self.db.get('settings', where={'key': 'telegram_api_hash'})
+                ap_port_setting = self.db.get('settings', where={'key': 'ap_port'}) # Get AP_PORT
 
                 if not bot_token_setting or bot_token_setting['value'] == 'YOUR_TELEGRAM_BOT_TOKEN':
                     print("[!] Telegram bot token not configured. Cannot start bot.")
@@ -964,57 +969,77 @@ PersistentKeepalive = 25
                     print("[!] Telegram API Hash not configured. Cannot start bot.")
                     return False
 
-                bot_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bot.py')
+                bot_script_path = os.path.join(current_script_dir, 'bot.py')
+
+                # Verify venv python path exists
+                if not os.path.exists(venv_python_path):
+                    print(f"[!] Error: Virtual environment Python interpreter not found at {venv_python_path}. Please ensure the virtual environment is correctly set up.")
+                    return False
 
                 env = os.environ.copy()
                 env["TELEGRAM_API_ID"] = api_id_setting['value']
                 env["TELEGRAM_API_HASH"] = api_hash_setting['value']
-                log_file_path = "/var/log/candy-telegram-bot.log" # Or another suitable path
-                with open(log_file_path, "a") as log_file: # "a" for append mode
+                if ap_port_setting and ap_port_setting['value'].isdigit():
+                    env["AP_PORT"] = ap_port_setting['value']
+                else:
+                    env["AP_PORT"] = '3446' # Default if not set in DB
+
+                log_file_path = "/var/log/candy-telegram-bot.log"
+                with open(log_file_path, "a") as log_file:
                     process = subprocess.Popen(
-                        ['python3', bot_script_path],
-                        stdout=log_file,  # Redirect stdout to file
-                        stderr=log_file,  # Redirect stderr to file
+                        [venv_python_path, bot_script_path], # Use venv's python
+                        stdout=log_file,
+                        stderr=log_file,
                         preexec_fn=os.setsid,
                         env=env
                     )
                 self.db.update('settings', {'value': str(process.pid)}, {'key': 'telegram_bot_pid'})
+                self.db.update('settings', {'value': '1'}, {'key': 'telegram_bot_status'})
                 print(f"[+] Telegram bot started with PID: {process.pid}")
                 return True
             except FileNotFoundError:
-                print(f"[!] Error: bot.py not found at {bot_script_path}. Cannot start bot.")
+                print(f"[!] Error: bot.py not found at {bot_script_path} or venv python not found. Cannot start bot.")
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_status'})
                 return False
             except Exception as e:
                 print(f"[!] Failed to start Telegram bot: {e}")
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_status'})
                 return False
 
         elif action == 'stop':
             if not is_running:
-                print("[*] Telegram bot is already stopped.")
+                print("[*] Telegram bot is already stopped (or PID is stale).")
                 self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
-                return True # Already in desired state
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_status'})
+                return True
 
             print("[*] Attempting to stop Telegram bot...")
             try:
                 process = psutil.Process(current_pid)
                 cmdline = " ".join(process.cmdline()).lower()
-                if "bot.py" in cmdline:
+                if "bot.py" in cmdline and "python" in cmdline:
                     process.terminate()
                     process.wait(timeout=5)
                     print(f"[+] Telegram bot (PID: {current_pid}) stopped.")
                 else:
-                    print(f"[!] PID {current_pid} is not the Telegram bot. Not terminating.")
+                    print(f"[!] PID {current_pid} is not identified as the Telegram bot. Not terminating.")
+                
                 self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_status'})
                 return True
             except psutil.NoSuchProcess:
                 print(f"[!] Telegram bot process with PID {current_pid} not found. Assuming it's already stopped.")
                 self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
-                return False
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_status'})
+                return True
             except psutil.TimeoutExpired:
                 print(f"[!] Telegram bot process with PID {current_pid} did not terminate gracefully. Killing...")
                 process.kill()
                 process.wait()
                 self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
+                self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_status'})
                 return True
             except Exception as e:
                 print(f"[!] Error stopping Telegram bot (PID: {current_pid}): {e}")
