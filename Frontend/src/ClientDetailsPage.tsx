@@ -176,7 +176,7 @@ PersistentKeepalive = 25`;
           <div className="w-16 h-16 bg-blue-600 rounded-2xl mx-auto mb-4 flex items-center justify-center animate-pulse">
             <Shield className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white mb-2">WireGuard Client</h1>
+          <h1 className="text-2xl font-bold text-white mb-2">Candy Panel Wiregaurd Client</h1>
           <p className="text-gray-400">Configuration Details</p>
         </div>
 
