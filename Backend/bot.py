@@ -3,7 +3,7 @@ import httpx
 import json
 import os
 import re
-from pyrogram import Client, filters , idle 
+from pyrogram import Client, filters 
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
 # --- Configuration ---
@@ -44,19 +44,16 @@ def get_bot_token_api_from_unified_api():
         return None
 
 # --- Pyrogram Client Initialization ---
-def init_pyrogram_client():
-    btoken,bapiid,bapihash = get_bot_token_api_from_unified_api()
-    if (not btoken or btoken == 'YOUR_TELEGRAM_BOT_TOKEN') or (not bapiid or bapiid == 'YOUR_TELEGRAM_API_ID') or (not bapihash or bapihash == 'YOUR_TELEGRAM_API_HASH') :
-        print("ERROR: Telegram bot token not found or is default. Please configure it in CandyPanel.db via main.py settings.")
-        exit(1)
-
-    app = Client(
-        "candy_panel_bot",
-        api_id=bapiid,
-        api_hash=bapihash,
-        bot_token=btoken
-    )
-    return app
+btoken,bapiid,bapihash = get_bot_token_api_from_unified_api()
+if (not btoken or btoken == 'YOUR_TELEGRAM_BOT_TOKEN') or (not bapiid or bapiid == 'YOUR_TELEGRAM_API_ID') or (not bapihash or bapihash == 'YOUR_TELEGRAM_API_HASH') :
+    print("ERROR: Telegram bot token not found or is default. Please configure it in CandyPanel.db via main.py settings.")
+    exit(1)
+app = Client(
+    "candy_panel_bot",
+    api_id=bapiid,
+    api_hash=bapihash,
+    bot_token=btoken
+)
 
 # Initialize the client outside of main() to make it accessible to handlers
 app = None # Will be initialized in main
@@ -943,7 +940,6 @@ async def cp_trigger_sync_command(client: Client, message: Message):
 
 # --- Main Execution ---
 
-app = init_pyrogram_client()
-if app:
-    print("Bot started. Press Ctrl+C to exit.")
-    app.run()
+
+print("Bot started. Press Ctrl+C to exit.")
+app.run()
