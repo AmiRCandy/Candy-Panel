@@ -358,7 +358,7 @@ function App() {
   };
   const shortLink = async (name: string,public_key:string) => {
     try {
-      window.location.href = `${API_BASE_URL}/client-details/${name}/${public_key}`
+      window.location.href = `${API_BASE_URL}/shortlink/${name}/${public_key}`
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Download failed', true);
     }

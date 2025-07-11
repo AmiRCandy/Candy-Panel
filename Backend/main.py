@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, abort, g, send_from_directory
+from flask import Flask, request, jsonify, abort, g, send_from_directory , send_file
 from functools import wraps
 from flask_cors import CORS
 import asyncio
@@ -1042,11 +1042,11 @@ async def bot_admin_server_control():
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
-def serve_frontend(path):
-    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+def catch_all_frontend_routes(path):
+    try:
         return send_from_directory(app.static_folder, path)
-    else:
-        return send_from_directory(app.static_folder, 'index.html')
+    except Exception as e:
+        return send_file(os.path.join(app.static_folder, 'index.html'))
 
 # This is for development purposes only. For production, use a WSGI server like Gunicorn.
 if __name__ == '__main__':
