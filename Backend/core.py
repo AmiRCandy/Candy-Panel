@@ -245,58 +245,40 @@ AllowedIPs = {client_ip}/32
     def _get_current_wg_peer_traffic(self, wg_id: int) -> dict:
         """
         Retrieves current traffic statistics (rx, tx) for all WireGuard peers
-        on a specific interface from 'wg show'.
-        Returns a dictionary: {public_key: {'ip': str, 'rx': int, 'tx': int}}
+        on a specific interface from 'wg show dump'.
+        Returns a dictionary: {public_key: {'rx': int, 'tx': int}}
         """
         traffic_data = {}
         try:
-            # Use 'dump' command to get machine-readable output
-            result = subprocess.run(['wg', 'show', f"wg{wg_id}", 'dump'], capture_output=True, text=True, check=True)
+            # Use 'sudo wg show <interface> dump' to get machine-readable output
+            result = subprocess.run(['sudo', 'wg', 'show', f"wg{wg_id}", 'dump'], capture_output=True, text=True, check=True)
             output_lines = result.stdout.strip().splitlines()
 
-            # The first line is for the interface, subsequent lines are for peers
-            # The format seems to be space-separated in your case, not tab-separated.
-            # Use split() without args to handle multiple spaces as one delimiter.
-            # Expected format:
-            # wg0	server_pub_key	server_priv_key	listen_port	fwmark	peer_pub_key	preshared_key	endpoint	allowed_ips	latest_handshake	transfer_rx	transfer_tx	persistent_keepalive	protocol_version
-
+            # The 'dump' output for an interface lists the interface details on the first line,
+            # followed by a line for each peer.
+            # Peer line format: <public_key>\t<preshared_key>\t<endpoint>\t<allowed_ips>\t<latest_handshake>\t<transfer_rx>\t<transfer_tx>\t<persistent_keepalive>
             for line in output_lines:
-                # Skip interface line and empty lines
-                if not line or line.startswith(f"wg{wg_id}"): # Still check for wg_id prefix if it eventually returns
-                    # If the interface line also contains public key, it's typically the first field.
-                    # Your sample output starts with public key directly for interface line, and then peer line.
-                    # Let's refine parsing based on your exact 'dump' output.
-                    #
-                    # Based on your exact dump output:
-                    # Line 1: Server's Private Key, Server's Public Key, Listen Port, Off
-                    # KIPjLgU/l7riYynf2m+A72lVib2NgXCnUtYsIrRjw0A=      2ne2Jz8nfcug3P5kK87P/fzpaD6tVumcubJmUJLlMzU=      51821      off
-                    #
-                    # Line 2 (Peer): Peer Public Key, (none), Endpoint, AllowedIPs, Handshake, RX, TX, Off
-                    # zZxZPV9JKmtBT1bGw1wcIoe24Ue2DIvQunWHR+Mc7gI=      (none)  37.129.186.81:32259      156.66.66.2/32      1752159098        3350240 47470388        off
+                parts = line.strip().split('\t') # Explicitly split by tab
 
-                    # We need to distinguish between the interface line and peer lines.
-                    # A robust way is to check the number of parts. Peer lines have more.
-                    parts = line.strip().split() # Split by any whitespace
+                # A valid peer line should have exactly 8 parts
+                if len(parts) == 8:
+                    try:
+                        pubkey = parts[0] # Peer public key is the first field
+                        rx = int(parts[5]) # transfer_rx is the 6th field (index 5)
+                        tx = int(parts[6]) # transfer_tx is the 7th field (index 6)
+                        traffic_data[pubkey] = {'rx': rx, 'tx': tx}
+                    except (ValueError, IndexError) as e:
+                        print(f"Warning: Could not parse wg dump peer line: '{line.strip()}'. Error: {e}")
+                elif len(parts) == 4:
+                    # This is likely the interface line (Private Key, Public Key, Listen Port, FwMark)
+                    # We can skip this line as it doesn't contain peer traffic info.
+                    pass
+                else:
+                    # Other unexpected lines or malformed lines
+                    print(f"Warning: Unexpected line format or number of parts in wg dump output: '{line.strip()}'")
 
-                    # Check if it's likely a peer line (based on number of fields in your provided dump)
-                    if len(parts) >= 8: # A peer line should have at least public_key, (none), endpoint, allowed_ips, handshake, rx, tx, off
-                        try:
-                            # From your provided sample dump:
-                            # Peer Public Key is parts[0]
-                            pubkey = parts[0] # The public key for the peer
-
-                            # transfer_rx is parts[5]
-                            rx = int(parts[5])
-
-                            # transfer_tx is parts[6]
-                            tx = int(parts[6])
-
-                            traffic_data[pubkey] = {'rx': rx, 'tx': tx}
-                            # print(f"DEBUG: Parsed traffic for {pubkey}: RX={rx}, TX={tx}") # Uncomment for debugging
-                        except (ValueError, IndexError) as e:
-                            print(f"Warning: Could not parse wg dump line (peer format mismatch): {line.strip()}. Error: {e}")
         except subprocess.CalledProcessError as e:
-            print(f"Warning: Failed to run `wg show wg{wg_id} dump`. Error: {e.stderr.strip()}")
+            print(f"Warning: Failed to run `sudo wg show wg{wg_id} dump`. Error: {e.stderr.strip()}. Please ensure WireGuard is installed and you have appropriate permissions (e.g., sudo access).")
         except Exception as e:
             print(f"An unexpected error occurred while getting traffic for wg{wg_id}: {e}")
         return traffic_data
@@ -667,7 +649,15 @@ PersistentKeepalive = 25
 
         interface_name = f"wg{new_wg_id}"
         path = self._get_interface_path(interface_name)
-
+        print("[+] Installing and configuring UFW...")
+        try:
+            self.run_command("sudo ufw default deny incoming")
+            self.run_command("sudo ufw default allow outgoing")
+            self.run_command(f"sudo ufw allow {port}/udp")
+            self.run_command("sudo ufw --force enable")
+            print("[+] UFW configured successfully.")
+        except Exception as e:
+            return False, f"Failed to configure UFW: {e}"
         if self._interface_exists(interface_name):
             return False, f"Interface {interface_name} configuration file already exists."
         default_interface = self._get_default_interface()
