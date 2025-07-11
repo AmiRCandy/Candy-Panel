@@ -13,7 +13,7 @@ from core import CandyPanel, CommandExecutionError
 candy_panel = CandyPanel()
 
 # --- Flask Application Setup ---
-app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/')
+app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/static')
 print(f"DEBUG: app.static_folder resolved to: {app.static_folder}") # <-- Ensure this line is present
 app.config['SECRET_KEY'] = 'your_super_secret_key'
 CORS(app)
@@ -1041,11 +1041,21 @@ async def bot_admin_server_control():
         return error_response(f"CandyPanel Error: {message}", 500)
 
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def catch_all_frontend_routes(path):
+@app.route('/')
+def serve_root_index():
     return send_file(os.path.join(app.static_folder, 'index.html'))
 
+# 2. Catch-all route for other client-side paths or direct static asset requests
+@app.route('/<path:path>')
+def catch_all_frontend_routes(path):
+    # This function will try to serve static assets (like /assets/index.js, /vite.svg if still requested directly)
+    # if they exist in the static_folder (your 'dist' directory).
+    static_file_path = os.path.join(app.static_folder, path)
+    if os.path.exists(static_file_path) and os.path.isfile(static_file_path):
+        return send_file(static_file_path)
+    else:
+        # If the path is not a static file, serve index.html for React Router to handle
+        return send_file(os.path.join(app.static_folder, 'index.html'))
 # This is for development purposes only. For production, use a WSGI server like Gunicorn.
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get('AP_PORT',3446)))
