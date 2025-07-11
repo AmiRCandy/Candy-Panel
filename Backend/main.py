@@ -261,12 +261,12 @@ async def manage_resources():
                         if not bot_control_success:
                             # Log the failure, but return success for setting update if DB was successful
                             print(f"Warning: Failed to start bot immediately after setting update.")
-                            return success_response(f"{message} (Bot start attempted, but failed.)")
+                            return success_response(f"(Bot start attempted, but failed.)")
                     else: # '0' means OFF
                         bot_control_success = await asyncio.to_thread(candy_panel._manage_telegram_bot_process, 'stop')
                         if not bot_control_success:
                             print(f"Warning: Failed to stop bot immediately after setting update.")
-                            return success_response(f"{message} (Bot stop attempted, but failed.)")
+                            return success_response(f"(Bot stop attempted, but failed.)")
                 success, message = await asyncio.to_thread(candy_panel._change_settings, key, value)
                 if not success:
                     return error_response(message, 400)
@@ -322,94 +322,141 @@ async def bot_register_user():
 
     user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
     if user:
-        return success_response("User already registered.", data={"registered": True})
-
+        return success_response("User already registered.", data={"registered": True, "language": user.get('language', 'en')}) # Return current language
+    
+    # Default language is English
     await asyncio.to_thread(candy_panel.db.insert, 'users', {
         'telegram_id': telegram_id,
-        'created_at': datetime.now().isoformat()
+        'created_at': datetime.now().isoformat(),
+        'language': 'en' 
     })
-    return success_response("User registered successfully.", data={"registered": True})
+    return success_response("User registered successfully.", data={"registered": True, "language": "en"})
 
-@app.post("/bot_api/user/buy_traffic_request")
-async def bot_buy_traffic_request():
+@app.post("/bot_api/user/set_language")
+async def bot_set_language():
     data = request.json
     telegram_id = data.get('telegram_id')
-    order_id = data.get('order_id')
-    card_number_sent = data.get('card_number_sent')
+    language = data.get('language')
+
+    if not all([telegram_id, language]):
+        return error_response("Missing telegram_id or language", 400)
+
+    if language not in ['en', 'fa']: # Only allow 'en' or 'fa' for now
+        return error_response("Unsupported language. Available: 'en', 'fa'", 400)
+
+    if not await asyncio.to_thread(candy_panel.db.has, 'users', {'telegram_id': telegram_id}):
+        return error_response("User not registered with the bot.", 404)
+
+    await asyncio.to_thread(candy_panel.db.update, 'users', {'language': language}, {'telegram_id': telegram_id})
+    return success_response("Language updated successfully.")
+
+
+@app.post("/bot_api/user/initiate_purchase") # NEW ENDPOINT
+async def bot_initiate_purchase():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    
+    if not telegram_id:
+        return error_response("Missing telegram_id", 400)
+
+    if not await asyncio.to_thread(candy_panel.db.has, 'users', {'telegram_id': telegram_id}):
+        return error_response("User not registered with the bot.", 404)
+
+    prices_json = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'prices'})
+    prices = json.loads(prices_json['value']) if prices_json and prices_json['value'] else {}
+
+    admin_card_number_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'admin_card_number'})
+    admin_card_number = admin_card_number_setting['value'] if admin_card_number_setting else 'YOUR_ADMIN_CARD_NUMBER'
+
+    return success_response("Purchase initiation details.", data={
+        "admin_card_number": admin_card_number,
+        "prices": prices
+    })
+
+@app.post("/bot_api/user/calculate_price") # NEW ENDPOINT
+async def bot_calculate_price():
+    data = request.json
+    telegram_id = data.get('telegram_id')
     purchase_type = data.get('purchase_type')
     quantity = data.get('quantity')
-    time_quantity = data.get('time_quantity', 0) 
+    time_quantity = data.get('time_quantity', 0)
     traffic_quantity = data.get('traffic_quantity', 0)
 
     if not all([telegram_id, purchase_type]):
         return error_response("Missing telegram_id or purchase_type", 400)
 
-    # Check if user exists
     if not await asyncio.to_thread(candy_panel.db.has, 'users', {'telegram_id': telegram_id}):
         return error_response("User not registered with the bot.", 404)
 
     prices_json = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'prices'})
-    prices = json.loads(prices_json['value']) if prices_json else {}
+    prices = json.loads(prices_json['value']) if prices_json and prices_json['value'] else {}
 
     calculated_amount = 0
     if purchase_type == 'gb':
         if quantity is None: return error_response("Missing quantity for GB purchase", 400)
         price_per_gb = prices.get('1GB')
         if not price_per_gb:
-            return error_response("Price per GB not configured.", 500)
-        calculated_amount = price_per_gb * quantity
+            return error_response("Price per GB not configured. Please contact support.", 500)
+        calculated_amount = price_per_gb * float(quantity)
     elif purchase_type == 'month':
         if quantity is None: return error_response("Missing quantity for Month purchase", 400)
         price_per_month = prices.get('1Month')
         if not price_per_month:
-            return error_response("Price per Month not configured.", 500)
-        calculated_amount = price_per_month * quantity
+            return error_response("Price per Month not configured. Please contact support.", 500)
+        calculated_amount = price_per_month * float(quantity)
     elif purchase_type == 'custom':
         if time_quantity is None or traffic_quantity is None:
             return error_response("Missing time_quantity or traffic_quantity for custom purchase", 400)
         price_per_gb = prices.get('1GB')
         price_per_month = prices.get('1Month')
         if not price_per_gb or not price_per_month:
-            return error_response("Prices for custom plan (1GB or 1Month) not configured.", 500)
-        calculated_amount = (price_per_gb * traffic_quantity) + (price_per_month * time_quantity)
+            return error_response("Prices for custom plan (1GB or 1Month) not configured. Please contact support.", 500)
+        calculated_amount = (price_per_gb * float(traffic_quantity)) + (price_per_month * float(time_quantity))
     else:
         return error_response("Invalid purchase_type. Must be 'gb', 'month', or 'custom'.", 400)
+    
+    return success_response("Price calculated successfully.", data={"calculated_amount": calculated_amount})
 
-    # If this is the final request (from /bought command), then order_id and card_number_sent will be real
-    if order_id and card_number_sent:
-        # Check if order_id already exists (to prevent duplicate requests)
-        if await asyncio.to_thread(candy_panel.db.has, 'transactions', {'order_id': order_id}):
-            return error_response("Order ID already exists. Please use a unique order ID.", 400)
 
-        await asyncio.to_thread(candy_panel.db.insert, 'transactions', {
-            'order_id': order_id,
-            'telegram_id': telegram_id,
-            'amount': calculated_amount,
-            'card_number_sent': card_number_sent,
-            'status': 'pending',
-            'requested_at': datetime.now().isoformat(),
-            'purchase_type': purchase_type,
-            'quantity': quantity if quantity is not None else 0, # Store quantity for 'gb'/'month'
-            'time_quantity': time_quantity, # Store for 'custom'
-            'traffic_quantity': traffic_quantity # Store for 'custom'
-        })
-        message_to_user = "Purchase request submitted. Admin will review."
-    else: # This is the initial request to get prices and card number, or quantity selection
-        message_to_user = "Please choose your purchase type and quantity."
+@app.post("/bot_api/user/submit_transaction") # NEW ENDPOINT
+async def bot_submit_transaction():
+    data = request.json
+    telegram_id = data.get('telegram_id')
+    order_id = data.get('order_id')
+    card_number_sent = data.get('card_number_sent') # This will be "User confirmed payment" for now
+    purchase_type = data.get('purchase_type')
+    amount = data.get('amount') # Calculated amount from previous step
+    quantity = data.get('quantity', 0) # For 'gb' or 'month'
+    time_quantity = data.get('time_quantity', 0) # For 'custom'
+    traffic_quantity = data.get('traffic_quantity', 0) # For 'custom'
+
+    if not all([telegram_id, order_id, card_number_sent, purchase_type, amount is not None]):
+        return error_response("Missing required transaction details.", 400)
+
+    # Check if order_id already exists (to prevent duplicate requests)
+    if await asyncio.to_thread(candy_panel.db.has, 'transactions', {'order_id': order_id}):
+        return error_response("This Order ID has already been submitted. Please use a unique one or contact support if you believe this is an error.", 400)
+
+    await asyncio.to_thread(candy_panel.db.insert, 'transactions', {
+        'order_id': order_id,
+        'telegram_id': telegram_id,
+        'amount': amount,
+        'card_number_sent': card_number_sent,
+        'status': 'pending',
+        'requested_at': datetime.now().isoformat(),
+        'purchase_type': purchase_type,
+        'quantity': quantity,
+        'time_quantity': time_quantity,
+        'traffic_quantity': traffic_quantity
+    })
 
     admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
-    admin_card_number_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'admin_card_number'})
-    admin_card_number = admin_card_number_setting['value'] if admin_card_number_setting else 'YOUR_ADMIN_CARD_NUMBER'
-
-
-    return success_response(message_to_user, data={
-        "admin_card_number": admin_card_number,
-        "prices": prices,
-        "admin_telegram_id": admin_telegram_id,
-        "calculated_amount": calculated_amount # Return calculated amount for user confirmation
+    return success_response("Transaction submitted for review.", data={
+        "admin_telegram_id": admin_telegram_id
     })
+
 
 @app.post("/bot_api/user/get_license")
 async def bot_get_user_license():
@@ -420,13 +467,13 @@ async def bot_get_user_license():
 
     user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
     if not user:
-        return error_response("User not registered with the bot.", 404)
+        return error_response("User not registered with the bot. Please use /start to register.", 404)
     if not user.get('candy_client_name'):
-        return error_response("You don't have an active license yet. Please purchase one.", 404)
+        return error_response("You don't have an active license yet. Please purchase one using the 'Buy Traffic' option.", 404)
 
     success, config_content = await asyncio.to_thread(candy_panel._get_client_config, user['candy_client_name'])
     if not success:
-        return error_response(f"Failed to retrieve license: {config_content}", 500)
+        return error_response(f"Failed to retrieve license. Reason: {config_content}. Please contact support.", 500)
 
     return success_response("Your WireGuard configuration:", data={"config": config_content})
 
@@ -439,13 +486,17 @@ async def bot_get_account_status():
 
     user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
     if not user:
-        return error_response("User not registered with the bot.", 404)
+        return error_response("User not registered with the bot. Please use /start to register.", 404)
 
     status_info = {
         "status": user['status'],
         "traffic_bought_gb": user['traffic_bought_gb'],
         "time_bought_days": user['time_bought_days'],
-        "candy_client_name": user['candy_client_name']
+        "candy_client_name": user['candy_client_name'],
+        "used_traffic_bytes": 0, # Default to 0
+        "traffic_limit_bytes": 0, # Default to 0
+        "expires": 'N/A',
+        "note": ''
     }
 
     if user.get('candy_client_name'):
@@ -455,14 +506,18 @@ async def bot_get_account_status():
         if all_clients_data:
             client_info = next((c for c in all_clients_data if c['name'] == user['candy_client_name']), None)
             if client_info:
-                used_traffic = json.loads(client_info.get('used_trafic', '{"download":0,"upload":0}'))
-                status_info['used_traffic_bytes'] = used_traffic['download'] + used_traffic['upload']
+                try:
+                    used_traffic = json.loads(client_info.get('used_trafic', '{"download":0,"upload":0}'))
+                    status_info['used_traffic_bytes'] = used_traffic.get('download', 0) + used_traffic.get('upload', 0)
+                except (json.JSONDecodeError, TypeError):
+                    status_info['used_traffic_bytes'] = 0 # Fallback
                 status_info['expires'] = client_info.get('expires') # Get expiry from CandyPanel
                 status_info['traffic_limit_bytes'] = int(client_info.get('traffic', 0))
+                status_info['note'] = client_info.get('note', '') # Get note from CandyPanel client
             else:
-                status_info['note'] = "Client not found in CandyPanel. Data might be outdated."
+                status_info['note'] = "Your VPN client configuration might be out of sync or deleted from the server. Please contact support."
         else:
-            status_info['note'] = "Could not fetch live traffic data from CandyPanel."
+            status_info['note'] = "Could not fetch live traffic data from the server. Please try again later or contact support."
 
     return success_response("Your account status:", data=status_info)
 
@@ -484,7 +539,7 @@ async def bot_call_support():
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     if admin_telegram_id == '0':
-        return error_response("Admin Telegram ID not set in bot settings.", 500)
+        return error_response("Admin Telegram ID not set in bot settings. Support is unavailable.", 500)
 
     return success_response("Your message has been sent to support.", data={
         "admin_telegram_id": admin_telegram_id,
@@ -558,76 +613,159 @@ async def bot_admin_approve_transaction():
     if not transaction:
         return error_response("Transaction not found.", 404)
     if transaction['status'] != 'pending':
-        return error_response("Transaction is not pending.", 400)
+        return error_response("Transaction is not pending. It has been already processed.", 400)
 
     purchase_type = transaction['purchase_type']
     
     # Determine quantities based on purchase_type
-    if purchase_type == 'gb' or purchase_type == 'month':
-        quantity = transaction['quantity']
-        time_quantity = 0
-        traffic_quantity = 0
-        if purchase_type == 'gb':
-            traffic_quantity = quantity
-            expire_days_for_candy = 365 # Default expiry for GB plans
-        else: # 'month'
-            time_quantity = quantity
-            expire_days_for_candy = quantity * 30
-            traffic_quantity = 1000 # Default high traffic for time-based plans (1TB)
+    quantity_for_candy = 0 # This will be the traffic quota in bytes
+    expire_days_for_candy = 0 # This will be days for expiry
+
+    user_time_bought_days = 0
+    user_traffic_bought_gb = 0
+
+    if purchase_type == 'gb':
+        traffic_quantity_gb = float(transaction['quantity'])
+        expire_days_for_candy = 365 # Default expiry for GB plans, e.g., 1 year
+        quantity_for_candy = int(traffic_quantity_gb * (1024**3)) # Convert GB to bytes
+        user_traffic_bought_gb = traffic_quantity_gb
+        user_time_bought_days = 0 # No explicit time added for GB plans
+    elif purchase_type == 'month':
+        time_quantity_months = float(transaction['quantity'])
+        expire_days_for_candy = int(time_quantity_months * 30)
+        quantity_for_candy = int(1024 * (1024**3)) # Default high traffic for time-based plans (1TB)
+        user_traffic_bought_gb = 0 # No explicit traffic added for month plans
+        user_time_bought_days = expire_days_for_candy
     elif purchase_type == 'custom':
-        time_quantity = transaction['time_quantity']
-        traffic_quantity = transaction['traffic_quantity']
-        expire_days_for_candy = time_quantity * 30 # Convert months to days
+        time_quantity_months = float(transaction['time_quantity'])
+        traffic_quantity_gb = float(transaction['traffic_quantity'])
+        expire_days_for_candy = int(time_quantity_months * 30)
+        quantity_for_candy = int(traffic_quantity_gb * (1024**3)) # Convert GB to bytes
+        user_traffic_bought_gb = traffic_quantity_gb
+        user_time_bought_days = expire_days_for_candy
     else:
         return error_response("Invalid purchase_type in transaction record.", 500)
     
-    # Generate a unique client name (e.g., "user_<telegram_id>_<timestamp>")
-    client_name = f"user_{transaction['telegram_id']}_{int(datetime.now().timestamp())}"
-
-    expires_dt = datetime.now() + timedelta(days=int(expire_days_for_candy))
-    expires_iso = expires_dt.isoformat()
-    traffic_bytes = int(float(traffic_quantity) * (1024**3)) # Convert GB to bytes
-
-    # 1. Create client in CandyPanel (direct internal call)
-    success, message = await asyncio.to_thread(
-        candy_panel._new_client,
-        client_name,
-        expires_iso,
-        str(traffic_bytes), # CandyPanel expects string
-        0, # Assuming default wg0 for now, can be made configurable
-        f"Bot User: {transaction['telegram_id']} - Order: {order_id} - Type: {purchase_type} - T: {time_quantity} - G: {traffic_quantity}"
-    )
-
-    if not success:
-        return error_response(f"Failed to create client in CandyPanel: {message}", 500)
-
-    # The _new_client method returns the client config as 'message' on success
-    client_config = message 
-
-    # 2. Update bot's user table
+    # Get user from bot's DB
     user_in_bot_db = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': transaction['telegram_id']})
-    if user_in_bot_db:
-        await asyncio.to_thread(candy_panel.db.update, 'users', {
-            'candy_client_name': client_name,
-            'traffic_bought_gb': user_in_bot_db.get('traffic_bought_gb', 0) + traffic_quantity, # Accumulate traffic
-            'time_bought_days': user_in_bot_db.get('time_bought_days', 0) + expire_days_for_candy, # Accumulate time
-            'status': 'active'
-        }, {'telegram_id': transaction['telegram_id']})
-    else:
+    if not user_in_bot_db:
         print(f"Warning: User {transaction['telegram_id']} not found in bot_db during transaction approval.")
+        return error_response(f"User {transaction['telegram_id']} not found in bot's database. Cannot approve.", 404)
 
+    client_name = user_in_bot_db.get('candy_client_name')
+    if not client_name:
+        # Generate a unique client name if none exists (e.g., "user_<telegram_id>")
+        # Use a more stable client name, maybe just based on telegram_id if unique enough
+        client_name = f"tguser_{transaction['telegram_id']}"
+        # Ensure uniqueness by appending timestamp if a client with this name already exists in CandyPanel
+        existing_client = await asyncio.to_thread(candy_panel.db.get, 'clients', where={'name': client_name})
+        if existing_client:
+            client_name = f"tguser_{transaction['telegram_id']}_{int(datetime.now().timestamp())}"
 
-    # 3. Update transaction status
+    current_expires_str = None
+    current_traffic_str = None
+    candy_client_exists = False
+    
+    # Check if client exists in CandyPanel DB
+    existing_candy_client = await asyncio.to_thread(candy_panel.db.get, 'clients', where={'name': client_name})
+    if existing_candy_client:
+        candy_client_exists = True
+        current_expires_str = existing_candy_client.get('expires')
+        current_traffic_str = existing_candy_client.get('traffic')
+        current_used_traffic = json.loads(existing_candy_client.get('used_trafic', '{"download":0,"upload":0,"last_wg_rx":0,"last_wg_tx":0}'))
+        current_total_used_bytes = current_used_traffic.get('download',0) + current_used_traffic.get('upload',0)
+    
+    # Calculate new expiry date based on existing one if present, otherwise from now
+    new_expires_dt = datetime.now()
+    if current_expires_str:
+        try:
+            current_expires_dt = datetime.fromisoformat(current_expires_str)
+            if current_expires_dt > new_expires_dt: # If current expiry is in future, extend from that point
+                new_expires_dt = current_expires_dt
+        except ValueError:
+            print(f"Warning: Invalid existing expiry date format for client '{client_name}'. Recalculating from now.")
+    
+    new_expires_dt += timedelta(days=expire_days_for_candy)
+    new_expires_iso = new_expires_dt.isoformat()
+
+    # Calculate new total traffic limit for CandyPanel: add the new traffic to existing total
+    new_total_traffic_bytes_for_candy = quantity_for_candy # Start with newly bought traffic
+    if candy_client_exists and current_traffic_str:
+        try:
+            # If the new plan is traffic-based, add to previous traffic limit.
+            # If the previous plan was time-based with a large dummy traffic, overwrite it.
+            # This logic can be refined if there are complex plan combinations.
+            # For simplicity, if the new purchase is traffic-based, we add to existing.
+            # If it's time-based, we set to a large default unless previous was larger and explicitly traffic-limited.
+            previous_traffic_limit_bytes = int(current_traffic_str)
+            if purchase_type == 'gb' or (purchase_type == 'custom' and traffic_quantity_gb > 0):
+                new_total_traffic_bytes_for_candy += previous_traffic_limit_bytes
+            elif purchase_type == 'month' and previous_traffic_limit_bytes < 1024 * (1024**3): # If previous was not already a large default
+                 new_total_traffic_bytes_for_candy = int(1024 * (1024**3)) # Set to 1TB if buying time
+        except ValueError:
+            print(f"Warning: Invalid existing traffic limit format for client '{client_name}'. Overwriting.")
+    
+    # Ensure new traffic limit is at least the current used traffic
+    if candy_client_exists and new_total_traffic_bytes_for_candy < current_total_used_bytes:
+        new_total_traffic_bytes_for_candy = current_total_used_bytes + quantity_for_candy # Ensure it's not less than already used + new purchase.
+
+    client_config = None # Will store the config if a new client is created
+
+    if not candy_client_exists:
+        # Create client in CandyPanel
+        success_cp, message_cp = await asyncio.to_thread(
+            candy_panel._new_client,
+            client_name,
+            new_expires_iso,
+            str(new_total_traffic_bytes_for_candy), # CandyPanel expects string
+            0, # Assuming default wg0 for now, can be made configurable via admin settings
+            f"Bot User: {transaction['telegram_id']} - Order: {order_id}"
+        )
+        if not success_cp:
+            return error_response(f"Failed to create client in CandyPanel: {message_cp}", 500)
+        client_config = message_cp # _new_client returns config on success
+    else:
+        # Update existing client in CandyPanel
+        # Ensure status is True when updating (unbanning if it was banned)
+        success_cp, message_cp = await asyncio.to_thread(
+            candy_panel._edit_client, 
+            client_name, 
+            expires=new_expires_iso, 
+            traffic=str(new_total_traffic_bytes_for_candy), # Update traffic quota
+            status=True # Ensure client is active
+        )
+        if not success_cp:
+            return error_response(f"Failed to update client in CandyPanel: {message_cp}", 500)
+        # If client was updated, user needs to get config again.
+        # Fetch the config explicitly here, as _edit_client doesn't return it
+        success_config, fetched_config = await asyncio.to_thread(candy_panel._get_client_config, client_name)
+        if success_config:
+            client_config = fetched_config
+        else:
+            print(f"Warning: Could not fetch updated config for existing client {client_name}: {fetched_config}")
+    
+    # Update bot's user table
+    # Accumulate bought traffic and time
+    await asyncio.to_thread(candy_panel.db.update, 'users', {
+        'candy_client_name': client_name,
+        'traffic_bought_gb': user_in_bot_db.get('traffic_bought_gb', 0) + user_traffic_bought_gb,
+        'time_bought_days': user_in_bot_db.get('time_bought_days', 0) + user_time_bought_days,
+        'status': 'active' # Ensure bot user status is active
+    }, {'telegram_id': transaction['telegram_id']})
+
+    # Update transaction status
     await asyncio.to_thread(candy_panel.db.update, 'transactions', {
         'status': 'approved',
         'approved_at': datetime.now().isoformat(),
         'admin_note': admin_note
     }, {'order_id': order_id})
 
-    return success_response(f"Transaction {order_id} approved. Client '{client_name}' created in CandyPanel.", data={
+    return success_response(f"Transaction {order_id} approved. Client '{client_name}' {'created' if not candy_client_exists else 'updated'} in CandyPanel.", data={
         "client_config": client_config, # Send config back to bot for user
         "telegram_id": transaction['telegram_id'], # For bot to send message to user
-        "client_name": client_name # Pass client name for user message
+        "client_name": client_name, # Pass client name for user message
+        "new_traffic_gb": user_traffic_bought_gb, # For bot message to user
+        "new_time_days": user_time_bought_days # For bot message to user
     })
 
 @app.post("/bot_api/admin/reject_transaction")
@@ -650,7 +788,7 @@ async def bot_admin_reject_transaction():
     if not transaction:
         return error_response("Transaction not found.", 404)
     if transaction['status'] != 'pending':
-        return error_response("Transaction is not pending.", 400)
+        return error_response("Transaction is not pending. It has been already processed.", 400)
 
     await asyncio.to_thread(candy_panel.db.update, 'transactions', {
         'status': 'rejected',
@@ -870,4 +1008,3 @@ def serve_frontend(path):
 # This is for development purposes only. For production, use a WSGI server like Gunicorn.
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get('AP_PORT',3446)))
-
