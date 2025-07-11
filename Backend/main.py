@@ -260,7 +260,6 @@ async def manage_resources():
                         bot_control_success = await asyncio.to_thread(candy_panel._manage_telegram_bot_process, 'start')
                         if not bot_control_success:
                             # Log the failure, but return success for setting update if DB was successful
-                            success, message = await asyncio.to_thread(candy_panel._change_settings, key, value)
                             print(f"Warning: Failed to start bot immediately after setting update.")
                             return success_response(f"(Bot start attempted, but failed.)")
                     else: # '0' means OFF
