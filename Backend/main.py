@@ -50,7 +50,20 @@ def error_response(message: str, status_code: int = 400):
     return jsonify({"message": message, "success": False}), status_code
 
 # --- CandyPanel API Endpoints ---
-
+@app.get("/client-details/<name>/<public_key>")
+async def get_client_public_details(name: str, public_key: str):
+    """
+    Retrieves public-facing details for a specific client given its name and public key.
+    This endpoint does NOT require authentication.
+    """
+    try:
+        client_data = await asyncio.to_thread(candy_panel._get_client_by_name_and_public_key, name, public_key)
+        if client_data:
+            return success_response("Client details retrieved successfully.", data=client_data)
+        else:
+            return error_response("Client not found or public key mismatch.", 404)
+    except Exception as e:
+        return error_response(f"An error occurred: {e}", 500)
 @app.get("/check")
 async def check_installation():
     """
