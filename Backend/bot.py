@@ -3,7 +3,7 @@ import httpx
 import json
 import os
 import re
-from pyrogram import Client, filters
+from pyrogram import Client, filters , idle 
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
 # --- Configuration ---
@@ -955,8 +955,10 @@ async def main():
     app = await init_pyrogram_client()
     if app:
         print("Bot started. Press Ctrl+C to exit.")
-        await app.run()
+        await app.start()  # Start the client
+        await idle()       # Keep the client running until termination
+    print("Bot stopped.") # This line will be executed after idle() returns (e.g., on Ctrl+C)
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
