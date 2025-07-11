@@ -1,4 +1,4 @@
-import asyncio
+import time
 import httpx
 import json
 import os
@@ -708,7 +708,7 @@ async def admin_broadcast_command(client: Client, message: Message):
             try:
                 await client.send_message(chat_id=user_id, text=f"📢 **Broadcast Message:**\n\n{message_to_send}")
                 sent_count += 1
-                await asyncio.sleep(0.1) # Small delay to avoid hitting Telegram API limits
+                time.sleep(0.2) # Small delay to avoid hitting Telegram API limits
             except Exception as e:
                 print(f"Error sending broadcast to user {user_id}: {e}")
         await message.reply_text(f"Broadcast sent to {sent_count} users.")
@@ -950,15 +950,8 @@ async def cp_trigger_sync_command(client: Client, message: Message):
 
 
 # --- Main Execution ---
-async def main():
-    global app
-    app = await init_pyrogram_client()
-    if app:
-        print("Bot started. Press Ctrl+C to exit.")
-        await app.start()  # Start the client
-        await idle()       # Keep the client running until termination
-    print("Bot stopped.") # This line will be executed after idle() returns (e.g., on Ctrl+C)
 
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+app = init_pyrogram_client()
+if app:
+    print("Bot started. Press Ctrl+C to exit.")
+    app.run()
