@@ -69,6 +69,7 @@ class SQLite:
                 );
             """)
             # --- Telegram Bot Tables ---
+            # MODIFICATION HERE: Add 'language' column
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `users` (
                     `telegram_id` INTEGER PRIMARY KEY,
@@ -77,7 +78,8 @@ class SQLite:
                     `time_bought_days` INTEGER DEFAULT 0,
                     `status` TEXT DEFAULT 'active',
                     `is_admin` BOOLEAN DEFAULT 0,
-                    `created_at` TEXT NOT NULL
+                    `created_at` TEXT NOT NULL,
+                    `language` TEXT DEFAULT 'en' -- New language column with default 'en'
                 );
             """)
             self.cursor.execute("""
@@ -238,4 +240,3 @@ class SQLite:
             self.conn.close()
             self.conn = None
             self.cursor = None
-
