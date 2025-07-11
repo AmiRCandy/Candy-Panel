@@ -1,6 +1,7 @@
 # core.py
-import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , netifaces
+import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , netifaces , string
 from db import SQLite
+from nanoid import generate
 from datetime import datetime , timedelta
 
 # --- Configuration Paths (Consider making these configurable in a real app) ---
@@ -919,6 +920,49 @@ PersistentKeepalive = 25
             return False, "API tokens setting contains invalid JSON. Cannot retrieve token."
         except Exception as e:
             return False, f"Failed to retrieve API token: {e}"
+    def _generate_unique_short_code(self, length=7): #
+        """
+        Generates a unique short alphanumeric code for a URL.
+        """
+        characters = string.ascii_letters + string.digits
+        while True:
+            short_code = generate(characters, length) #
+            if not self.db.has('shortlinks', {'short_code': short_code}): #
+                return short_code
+    def _get_client_by_name_and_public_key(self, name: str, public_key: str) -> dict | None:
+        """
+        Retrieves a client record by its name AND public key.
+        This is used for public-facing client detail pages.
+        """
+        client = self.db.get('clients', where={'name': name, 'public_key': public_key})
+        if not client:
+            return None
+
+        # Parse used_trafic JSON string into a dict
+        try:
+            client['used_trafic'] = json.loads(client['used_trafic'])
+        except (json.JSONDecodeError, TypeError):
+            client['used_trafic'] = {"download": 0, "upload": 0} # Default if parsing fails
+
+        # Remove sensitive data like private_key for public view
+        client.pop('private_key', None)
+        # You might also want to remove 'wg' if it exposes internal structure
+        client.pop('wg', None)
+
+        # Fetch relevant interface details
+        interface = self.db.get('interfaces', where={'wg': client.get('wg', 0)}) # Use .get with default in case 'wg' was popped
+        if interface:
+            client['interface_public_key'] = interface['public_key']
+            client['interface_port'] = interface['port']
+        else:
+            client['interface_public_key'] = None
+            client['interface_port'] = None
+
+        # Add server endpoint details from settings
+        client['server_endpoint_ip'] = self.db.get('settings', where={'key': 'custom_endpont'})['value']
+        client['server_dns'] = self.db.get('settings', where={'key': 'dns'})['value']
+        client['server_mtu'] = self.db.get('settings', where={'key': 'mtu'})['value']
+        return client
     def _is_telegram_bot_running(self, pid: int) -> bool:
         """
         Checks if the Telegram bot process with the given PID is running.

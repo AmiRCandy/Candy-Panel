@@ -1,4 +1,4 @@
-import { ApiResponse, AuthData, AllData } from '../types';
+import { ApiResponse, AuthData, AllData , Client   } from '../types';
 
 const API_BASE_URL = `${window.location.protocol}//${window.location.host}`;
 
@@ -84,7 +84,9 @@ class ApiClient {
   async getAllData(): Promise<ApiResponse<AllData>> {
     return this.request<AllData>('/api/data');
   }
-
+  async getClientDetails(name: string, public_key: string): Promise<ApiResponse<Client>> {
+    return this.request<Client>(`/client-details/${name}/${public_key}`);
+  }
   async createClient(data: {
     name: string;
     expires: string;

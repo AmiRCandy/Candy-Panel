@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, abort, g, send_from_directory
+from flask import Flask, request, jsonify, abort, g, send_from_directory , send_file
 from functools import wraps
 from flask_cors import CORS
 import asyncio
@@ -13,7 +13,7 @@ from core import CandyPanel, CommandExecutionError
 candy_panel = CandyPanel()
 
 # --- Flask Application Setup ---
-app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/')
+app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/static')
 app.config['SECRET_KEY'] = 'your_super_secret_key'
 CORS(app)
 
@@ -50,7 +50,20 @@ def error_response(message: str, status_code: int = 400):
     return jsonify({"message": message, "success": False}), status_code
 
 # --- CandyPanel API Endpoints ---
-
+@app.get("/client-details/<name>/<public_key>")
+async def get_client_public_details(name: str, public_key: str):
+    """
+    Retrieves public-facing details for a specific client given its name and public key.
+    This endpoint does NOT require authentication.
+    """
+    try:
+        client_data = await asyncio.to_thread(candy_panel._get_client_by_name_and_public_key, name, public_key)
+        if client_data:
+            return success_response("Client details retrieved successfully.", data=client_data)
+        else:
+            return error_response("Client not found or public key mismatch.", 404)
+    except Exception as e:
+        return error_response(f"An error occurred: {e}", 500)
 @app.get("/check")
 async def check_installation():
     """
@@ -1027,14 +1040,17 @@ async def bot_admin_server_control():
         return error_response(f"CandyPanel Error: {message}", 500)
 
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_frontend(path):
-    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
-    else:
-        return send_from_directory(app.static_folder, 'index.html')
+@app.route('/')
+def serve_root_index():
+    return send_file(os.path.join(app.static_folder, 'index.html'))
 
+@app.route('/<path:path>')
+def catch_all_frontend_routes(path):
+    static_file_path = os.path.join(app.static_folder, path)
+    if os.path.exists(static_file_path) and os.path.isfile(static_file_path):
+        return send_file(static_file_path)
+    else:
+        return send_file(os.path.join(app.static_folder, 'index.html'))
 # This is for development purposes only. For production, use a WSGI server like Gunicorn.
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get('AP_PORT',3446)))

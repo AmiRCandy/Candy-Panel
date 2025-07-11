@@ -19,6 +19,7 @@ import {
   Network,
   LogOut,
   Shield,
+  Link2,
   Bot, // New icon for Telegram Bot
   Key // New icon for API Tokens
 } from 'lucide-react';
@@ -31,7 +32,7 @@ interface TabButtonProps {
   isActive: boolean;
   onClick: () => void;
 }
-
+const API_BASE_URL = `${window.location.protocol}//${window.location.host}`;
 const TabButton: React.FC<TabButtonProps> = ({ icon, label, isActive, onClick }) => (
   <button
     onClick={onClick}
@@ -351,6 +352,13 @@ function App() {
         a.click();
         URL.revokeObjectURL(url);
       }
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Download failed', true);
+    }
+  };
+  const shortLink = async (name: string,public_key:string) => {
+    try {
+      window.location.href = `${API_BASE_URL}/shortlink/${name}/${public_key}`
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Download failed', true);
     }
@@ -1005,6 +1013,13 @@ function App() {
                             title="Download Config"
                           >
                             <Download className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => shortLink(client.name,client.public_key)}
+                            className="p-2 text-blue-400 hover:bg-blue-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
+                            title="ShortLink"
+                          >
+                            <Link2 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => editClient(client)}

@@ -1,8 +1,8 @@
 export interface Client {
   name: string;
-  wg: number;
+  wg?: number;
   public_key: string;
-  private_key: string;
+  private_key?: string;
   address: string;
   created_at: string;
   expires: string;
@@ -14,6 +14,11 @@ export interface Client {
   };
   connected_now: boolean;
   status: boolean;
+  interface_public_key: string | null;
+  interface_port: number | null;
+  server_endpoint_ip: string;
+  server_dns: string;
+  server_mtu: string;
 }
 
 export interface Interface {
@@ -42,7 +47,6 @@ export interface DashboardStats {
     upload: string;
   };
 }
-
 export interface ApiResponse<T = any> {
   message: string;
   success: boolean;
