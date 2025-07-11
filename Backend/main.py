@@ -1044,10 +1044,7 @@ async def bot_admin_server_control():
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def catch_all_frontend_routes(path):
-    try:
-        return send_from_directory(app.static_folder, path)
-    except Exception as e:
-        return send_file(os.path.join(app.static_folder, 'index.html'))
+    return send_file(os.path.join(app.static_folder, 'index.html'))
 
 # This is for development purposes only. For production, use a WSGI server like Gunicorn.
 if __name__ == '__main__':
