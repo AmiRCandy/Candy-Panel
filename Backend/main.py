@@ -908,7 +908,37 @@ async def bot_admin_send_message_to_all():
     # This API endpoint just prepares the list of users.
     # The Telegram bot itself will handle the actual sending to avoid blocking the API.
     return success_response("Broadcast message prepared.", data={"target_user_ids": user_ids, "message": message_text})
+@app.get("/bot_api/admin/data")
+async def bot_admin_data():
+    try:
+        # Fetch all data concurrently
+        dashboard_stats_task = asyncio.to_thread(candy_panel._dashboard_stats)
+        clients_data_task = asyncio.to_thread(candy_panel._get_all_clients)
+        interfaces_data_task = asyncio.to_thread(candy_panel.db.select, 'interfaces')
+        settings_data_task = asyncio.to_thread(candy_panel.db.select, 'settings')
 
+        dashboard_stats, clients_data, interfaces_data, settings_raw = await asyncio.gather(
+            dashboard_stats_task, clients_data_task, interfaces_data_task, settings_data_task
+        )
+
+        # Process client data (parse used_trafic)
+        for client in clients_data:
+            try:
+                client['used_trafic'] = json.loads(client['used_trafic'])
+            except (json.JSONDecodeError, TypeError):
+                client['used_trafic'] = {"download": 0, "upload": 0}
+        
+        # Process settings data (convert to dict)
+        settings_data = {setting['key']: setting['value'] for setting in settings_raw}
+
+        return success_response("All data retrieved successfully.", data={
+            "dashboard": dashboard_stats,
+            "clients": clients_data,
+            "interfaces": interfaces_data,
+            "settings": settings_data
+        })
+    except Exception as e:
+        return error_response(f"Failed to retrieve all data: {e}", 500)
 @app.post("/bot_api/admin/server_control")
 async def bot_admin_server_control():
     data = request.json
