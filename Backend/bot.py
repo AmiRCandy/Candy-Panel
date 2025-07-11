@@ -55,9 +55,6 @@ app = Client(
     bot_token=btoken
 )
 
-# Initialize the client outside of main() to make it accessible to handlers
-app = None # Will be initialized in main
-
 # --- Keyboards ---
 user_menu_keyboard = InlineKeyboardMarkup([
     [InlineKeyboardButton("💰 Buy Traffic", callback_data="buy_traffic")],
