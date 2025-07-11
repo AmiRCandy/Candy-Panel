@@ -14,6 +14,7 @@ candy_panel = CandyPanel()
 
 # --- Flask Application Setup ---
 app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/')
+print(f"DEBUG: app.static_folder resolved to: {app.static_folder}") # <-- Ensure this line is present
 app.config['SECRET_KEY'] = 'your_super_secret_key'
 CORS(app)
 
