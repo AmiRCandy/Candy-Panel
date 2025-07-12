@@ -180,6 +180,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] Theme customization
 
 ---
+## Credits
+
+Thanks to [@Byte-Aura](https://github.com/Byte-Aura) for help with planning and testing.
+
+
 
 <div align="center">
   <p>Built with 💜 for WireGuard Enthusiasts</p>
