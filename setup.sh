@@ -50,7 +50,7 @@ print_success() {
 }
 
 print_error() {
-e   cho -e "${RED}ERROR:${RESET} $1" >&2
+  echo -e "${RED}ERROR:${RESET} $1" >&2
 }
 
 print_warning() {
