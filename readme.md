@@ -1,6 +1,6 @@
 # 🍭 Candy Panel - WireGuard Management System
 
-A modern, beautiful web interface for managing WireGuard VPN servers with comprehensive backend integration. Built with React, TypeScript, and a powerful Python FastAPI backend.
+A modern, beautiful web interface for managing WireGuard VPN servers with comprehensive backend integration. Built with React, TypeScript, and a powerful Python Flask backend.
 
 ![Candy Panel Dashboard](https://github.com/AmiRCandy/Candy-Panel/blob/15d1fa6852bb187ccbfcc5712c481cc3d00235cc/image.png)
 
