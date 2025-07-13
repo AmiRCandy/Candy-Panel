@@ -50,7 +50,7 @@ async def agent_get_dashboard_stats():
     """
     try:
         # Calls the local CandyPanel instance's _dashboard_stats method
-        stats = await asyncio.to_thread(agent_candy_panel._dashboard_stats)
+        stats = await agent_candy_panel._dashboard_stats()
         return success_response("Dashboard stats retrieved.", data=stats)
     except Exception as e:
         return error_response(f"Failed to get local dashboard stats: {e}", 500)
