@@ -1206,37 +1206,38 @@ function App() {
 
         {/* Common Settings */}
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">
-          <h3 className="font-semibold text-white mb-4">General Settings</h3>
-          <div className="space-y-6">
-            {commonSettings.map((setting) => (
-              <div key={setting.key}>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  {setting.label}
-                </label>
-                {setting.type === 'select' ? (
-                  <select
-                    value={stagedSettings[setting.key] || ''}
-                    onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
-                  >
-                    {setting.options?.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type={setting.type}
-                    value={stagedSettings[setting.key] || ''}
-                    onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
-                  />
-                )}
-              </div>
+  <h3 className="font-semibold text-white mb-4">General Settings</h3>
+  <div className="flex flex-wrap -mx-3 gap-y-6">
+    {commonSettings.map((setting) => (
+      <div key={setting.key} className="w-full md:w-1/2 px-3">
+        <label className="block text-sm font-medium text-gray-300 mb-2">
+          {setting.label}
+        </label>
+        {setting.type === 'select' ? (
+          <select
+            value={stagedSettings[setting.key] || ''}
+            onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+          >
+            {setting.options?.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
             ))}
-          </div>
-        </div>
+          </select>
+        ) : (
+          <input
+            type={setting.type}
+            value={stagedSettings[setting.key] || ''}
+            onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+          />
+        )}
+      </div>
+    ))}
+  </div>
+</div>
+
 
         {/* Telegram Bot Settings */}
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">

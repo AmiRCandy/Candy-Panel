@@ -1,0 +1,12 @@
+# Ignore Node.js dependencies
+/Frontend/node_modules/
+
+# Ignore build output
+/Frontend/dist/
+
+# Ignore the database file
+/Backend/Candy-Panel.db
+
+# Optional: Python cache files
+/Backend/__pycache__/
+*.pyc
