@@ -1,6 +1,6 @@
 import { ApiResponse, AuthData, AllData , Client   } from '../types';
 
-const API_BASE_URL = `${window.location.protocol}//${window.location.host}`;
+const API_BASE_URL = `http://127.0.0.1:3446`;
 
 class ApiClient {
   private token: string | null = null;

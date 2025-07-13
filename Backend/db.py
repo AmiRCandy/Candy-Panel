@@ -133,7 +133,7 @@ class SQLite:
             {'key': 'prices', 'value': '{"1GB": 4000, "1Month": 75000}'}, 
             {'key': 'api_tokens', 'value': '{}'},
             {'key': 'auto_backup', 'value': '1'},
-            {'key': 'install', 'value': '0'},
+            {'key': 'install', 'value': '1'},
             {'key': 'telegram_bot_pid', 'value': '0'},
             {'key': 'ap_port', 'value': '3446'},
         ]

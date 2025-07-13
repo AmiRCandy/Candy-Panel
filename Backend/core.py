@@ -1,9 +1,9 @@
 # core.py
-import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , netifaces , string
+import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , string
 from db import SQLite
 from nanoid import generate
 from datetime import datetime , timedelta
-
+netifaces = None
 # --- Configuration Paths (Consider making these configurable in a real app) ---
 SERVER_PUBLIC_KEY_PATH = "/etc/wireguard/server_public_wgX.key"
 SERVER_PRIVATE_KEY_PATH = "/etc/wireguard/server_private_wgX.key"

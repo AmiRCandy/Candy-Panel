@@ -1207,7 +1207,7 @@ function App() {
         {/* Common Settings */}
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">
   <h3 className="font-semibold text-white mb-4">General Settings</h3>
-  <div className="flex flex-wrap -mx-3 gap-y-6">
+  <div className="flex -mx-3 gap-y-6">
     {commonSettings.map((setting) => (
       <div key={setting.key} className="w-full md:w-1/2 px-3">
         <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -1243,10 +1243,7 @@ function App() {
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">
           <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
             <Bot className="w-5 h-5 text-purple-400" /> Telegram Bot Settings
-          </h3>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Telegram Bot Status</label>
+             <div>
               <label htmlFor="telegram-bot-status-toggle" className="flex items-center cursor-pointer">
                 <div className="relative">
                   <input
@@ -1264,6 +1261,8 @@ function App() {
                 </div>
               </label>
             </div>
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">Admin Telegram ID</label>
               <input
@@ -1316,11 +1315,10 @@ function App() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">Prices (JSON)</label>
-              <textarea
+              <input
                 value={stagedSettings['prices'] || ''}
                 onChange={(e) => updateStagedSetting('prices', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
-                rows={4}
                 placeholder='{"1Month":75000,"1GB":4000}'
               />
               <p className="text-xs text-gray-500 mt-1">Enter as a valid JSON string, e.g., `"per_month":75000,"per_gb":4000`</p>
