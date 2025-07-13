@@ -170,14 +170,14 @@ async def agent_create_interface():
     data = request.json
     address_range = data.get('address_range')
     port = data.get('port')
-
+    server_id = data.get('server_id')
     if not all([address_range, port]):
         return error_response("Missing address_range or port for interface creation.", 400)
 
     try:
         # The _new_interface_wg function in core.py (when called locally by agent)
         # now returns a JSON string with the new interface details.
-        success, message_json_str = await asyncio.to_thread(agent_candy_panel._new_interface_wg, address_range, port)
+        success, message_json_str = await asyncio.to_thread(agent_candy_panel._new_interface_wg, address_range, port,server_id)
         if success:
             # Parse the JSON string returned by _new_interface_wg
             interface_details = json.loads(message_json_str)
@@ -186,7 +186,8 @@ async def agent_create_interface():
                 data={
                     "wg_id": interface_details["wg_id"],
                     "private_key": interface_details["private_key"],
-                    "public_key": interface_details["public_key"]
+                    "public_key": interface_details["public_key"],
+                    "server_id":server_id
                 }
             )
         return error_response(message_json_str, 400) # message_json_str here would be an error string if not success

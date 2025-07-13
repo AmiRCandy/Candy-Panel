@@ -323,7 +323,7 @@ async def manage_resources():
                 port = data.get('port')
                 if not all([address_range, port]):
                     return error_response("Missing address_range or port for interface creation", 400)
-                success, message = await asyncio.to_thread(candy_panel._new_interface_wg, address_range, port, server_id=server_id)
+                success, message = await asyncio.to_thread(candy_panel._new_interface_wg, address_range, port,server_id=server_id)
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)

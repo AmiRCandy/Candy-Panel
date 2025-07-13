@@ -50,7 +50,7 @@ class SQLite:
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `interfaces` (
                     `wg` INTEGER,
-                    `server_id` INTEGER NOT NULL, -- Foreign key
+                    `server_id` INTEGER NOT NULL,
                     `private_key` TEXT NOT NULL,
                     `public_key` TEXT NOT NULL,
                     `port` INTEGER NOT NULL,

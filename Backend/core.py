@@ -913,7 +913,7 @@ PersistentKeepalive = 25
         If server_id is provided (by central panel), it orchestrates via remote agent.
         If server_id is None (agent acting locally), it performs local creation.
         """
-        if server_id is not None: # Central panel's call
+        if (server_id is not None) and (server_id != 1) : # Central panel's call
             agent = self.agent_clients.get(server_id)
             if not agent:
                 return False, f"Server with ID {server_id} not found or agent not configured."
@@ -927,7 +927,7 @@ PersistentKeepalive = 25
                     return False, f"An interface with address range {address_range} already exists on server {server_id}."
 
             try:
-                response =  agent.post("/interface/create", {"address_range": address_range, "port": port})
+                response =  agent.post("/interface/create", {"address_range": address_range, "port": port, "server_id": server_id})
                 if response.get('success'):
                     # Agent successfully created interface, now store its details in central DB
                     interface_details = response['data'] # Agent now returns these details explicitly
@@ -1005,6 +1005,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
 
             self.db.insert('interfaces', {
                 'wg': new_wg_id,
+                'server_id': server_id,
                 'private_key': private_key,
                 'public_key': public_key,
                 'port': port,
