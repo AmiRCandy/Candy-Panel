@@ -266,7 +266,8 @@ async def agent_get_traffic_dump():
         full_traffic_data = {}
         for iface in all_interfaces:
             wg_id = iface['wg']
-            full_traffic_data.update(await asyncio.to_thread(agent_candy_panel._get_current_wg_peer_traffic, wg_id))
+            x = await asyncio.to_thread(agent_candy_panel._get_current_wg_peer_traffic, wg_id)
+            full_traffic_data.update(x)
         return success_response("Traffic dump retrieved.", data={"traffic_data": full_traffic_data})
     except Exception as e:
         return error_response(f"Failed to retrieve traffic dump: {e}", 500)
