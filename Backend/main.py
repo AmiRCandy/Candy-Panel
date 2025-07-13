@@ -172,7 +172,7 @@ async def add_server():
         return error_response(f"Missing required field: {e}", 400)
 
     try:
-        success, message, server_id = await asyncio.to_thread(candy_panel.add_server, name, ip_address, int(agent_port), api_key, description)
+        success, message, server_id = await candy_panel.add_server( name, ip_address, int(agent_port), api_key, description)
         if success:
             return success_response(message, data={"server_id": server_id})
         return error_response(message, 400)
