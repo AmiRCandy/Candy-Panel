@@ -5,7 +5,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 import os
-
+import uuid
 # Import your CandyPanel logic
 from core import CandyPanel, CommandExecutionError
 
