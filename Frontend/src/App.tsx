@@ -696,10 +696,10 @@ function App() {
         }
 
         // For central CPU/Mem/Uptime, just take from the first active server found, or keep N/A
-        if (server.status === 'active' && centralCpu === 'N/A') {
-          centralCpu = server.dashboard_cache.cpu;
-          centralMem = server.dashboard_cache.mem;
-          centralUptime = server.dashboard_cache.uptime;
+         if (server.status === 'active' && centralCpu === 'N/A') {
+          centralCpu = server.dashboard_cache?.cpu || centralCpu;
+          centralMem = server.dashboard_cache?.mem || centralMem; // Fix applied here
+          centralUptime = server.dashboard_cache?.uptime || centralUptime;
         }
       }
     });
