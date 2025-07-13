@@ -122,18 +122,11 @@ async def handle_auth():
         # Pass AP_PORT and AGENT_PORT from environment to core._install_candy_panel
         # to ensure it can set up UFW correctly and self-register with correct ports.
         os.environ['AP_PORT'] = os.environ.get('AP_PORT', '3446')
-        os.environ['AGENT_PORT'] = os.environ.get('AGENT_PORT', '3447')
+        os.environ['AGENT_PORT'] = os.environ.get('AGENT_PORT', '1212')
         os.environ['AGENT_API_KEY_CENTRAL'] = os.environ.get('AGENT_API_KEY_CENTRAL', str(uuid.uuid4())) # Ensure this is generated/available
 
-        success, message = await asyncio.to_thread(
-            candy_panel._install_candy_panel,
-            server_ip,
-            wg_port,
-            wg_address_range,
-            wg_dns,
-            admin_user,
-            admin_password
-        )
+        success, message = candy_panel._install_candy_panel(server_ip,wg_port,wg_address_range,wg_dns,admin_user,admin_password)
+        
         if not success:
             return error_response(message, 400)
         return success_response(message)
