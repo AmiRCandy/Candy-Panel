@@ -56,7 +56,7 @@ print_success() {
 }
 
 print_error() {
-e   cho -e "${RED}ERROR:${RESET} $1" >&2
+    echo -e "${RED}ERROR:${RESET} $1" >&2
 }
 
 print_warning() {
@@ -297,10 +297,10 @@ After=network.target
 [Service]
 User=$LINUX_USER
 Group=$LINUX_USER
-WorkingDirectory=$BACKEND_DIR # Agent code is now in Backend directory
+WorkingDirectory=$BACKEND_DIR
 Environment="AGENT_PORT=$AGENT_PORT"
-Environment="AGENT_API_KEY=$AGENT_API_KEY_CENTRAL" # Agent uses this as its API key
-ExecStart=/bin/bash -c "cd /var/www/$PROJECT_NAME/Backend/ && /var/www/$PROJECT_NAME/Backend/venv/bin/python3 agent.py"
+Environment="AGENT_API_KEY=$AGENT_API_KEY_CENTRAL"
+ExecStart=$BACKEND_DIR/venv/bin/python3 agent.py
 Restart=always
 RestartSec=5s
 
