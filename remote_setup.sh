@@ -327,5 +327,5 @@ while true; do
             print_error "Invalid choice. Please enter a number between 1 and 2."
             sleep 2
             ;;
-    esajc
+    esac
 done
