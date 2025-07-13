@@ -27,6 +27,13 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Pan
 - Panel Default Port : 3446
 - API Default Port : 3446
 
+### 🚀 Remote server install command
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Panel/dev.test/remote_setup.sh)"
+```
+- Agent Default Port : 1212
+
 ### Prerequisites
 
 - Node.js 20+ and npm
