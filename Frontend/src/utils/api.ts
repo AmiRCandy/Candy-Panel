@@ -1,6 +1,6 @@
 import { ApiResponse, AuthData, AllData, Client, Server } from '../types';
 
-const API_BASE_URL = `http://127.0.0.1:3446`; // Central panel API base URL
+const API_BASE_URL = `${window.location.protocol}//${window.location.host}`;
 
 class ApiClient {
   private token: string | null = null;
