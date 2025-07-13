@@ -226,11 +226,11 @@ async def get_server_data(server_id: int):
     """
     try:
         # Fetch individual data types from the specified agent via core.py
-        dashboard_stats_response = await asyncio.to_thread(candy_panel._dashboard_stats_for_server, server_id) # New helper in core to get live dashboard
+        dashboard_stats_response = await candy_panel._dashboard_stats_for_server(server_id) # New helper in core to get live dashboard
         if not dashboard_stats_response.get('success'):
             return error_response(f"Failed to get dashboard stats from server {server_id}: {dashboard_stats_response.get('message', 'Unknown error')}", 500)
 
-        clients_data = await asyncio.to_thread(candy_panel._get_all_clients, server_id) # Filter clients by server_id
+        clients_data = await candy_panel._get_all_clients(server_id) # Filter clients by server_id
         interfaces_data = await asyncio.to_thread(candy_panel.db.select, 'interfaces', where={'server_id': server_id}) # Filter interfaces by server_id
 
         # Process client data (parse used_trafic)
