@@ -300,7 +300,7 @@ Group=$LINUX_USER
 WorkingDirectory=$BACKEND_DIR # Agent code is now in Backend directory
 Environment="AGENT_PORT=$AGENT_PORT"
 Environment="AGENT_API_KEY=$AGENT_API_KEY_CENTRAL" # Agent uses this as its API key
-ExecStart=$BACKEND_DIR/venv/bin/python3 $AGENT_APP_ENTRY
+ExecStart=/bin/bash -c "cd /var/www/$PROJECT_NAME/Backend/ && /var/www/$PROJECT_NAME/Backend/venv/bin/python3 agent.py"
 Restart=always
 RestartSec=5s
 
