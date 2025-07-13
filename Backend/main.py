@@ -125,7 +125,7 @@ async def handle_auth():
         os.environ['AGENT_PORT'] = os.environ.get('AGENT_PORT', '1212')
         os.environ['AGENT_API_KEY_CENTRAL'] = os.environ.get('AGENT_API_KEY_CENTRAL', str(uuid.uuid4())) # Ensure this is generated/available
 
-        success, message = candy_panel._install_candy_panel(server_ip,wg_port,wg_address_range,wg_dns,admin_user,admin_password)
+        success, message = await candy_panel._install_candy_panel(server_ip,wg_port,wg_address_range,wg_dns,admin_user,admin_password)
         
         if not success:
             return error_response(message, 400)
