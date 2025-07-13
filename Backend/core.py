@@ -1,5 +1,5 @@
 # core.py
-import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , string , asyncio , httpx
+import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re , string , httpx
 from db import SQLite
 from nanoid import generate
 from datetime import datetime , timedelta
@@ -23,11 +23,11 @@ class RemoteAgentClient:
         self.base_url = f"http://{ip_address}:{agent_port}/agent_api"
         self.api_key = api_key
 
-    async def post(self, endpoint: str, data: dict = None):
+    def post(self, endpoint: str, data: dict = None):
         headers = {"X-API-Key": self.api_key, "Content-Type": "application/json"}
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(f"{self.base_url}{endpoint}", json=data, headers=headers, timeout=30)
+            with httpx.AsyncClient() as client:
+                response =  client.post(f"{self.base_url}{endpoint}", json=data, headers=headers, timeout=30)
                 response.raise_for_status() # Raise an exception for 4xx/5xx responses
                 return response.json()
         except httpx.HTTPStatusError as e:
@@ -76,7 +76,7 @@ class CandyPanel:
                 # Optionally update server status to 'unreachable' in DB here
 
     # New: Methods for managing servers in the central database
-    async def add_server(self, name: str, ip_address: str, agent_port: int, api_key: str, description: str = '') -> tuple[bool, str, int | None]:
+    def add_server(self, name: str, ip_address: str, agent_port: int, api_key: str, description: str = '') -> tuple[bool, str, int | None]:
         """Adds a new remote server to the central panel's database."""
         if self.db.has('servers', {'name': name}):
             return False, f"Server with name '{name}' already exists.", None
@@ -84,7 +84,7 @@ class CandyPanel:
         # Test connection to the agent
         test_agent = RemoteAgentClient(ip_address, agent_port, api_key)
         try:
-            test_response = await test_agent.post("/dashboard")
+            test_response =  test_agent.post("/dashboard")
             if not test_response.get('success'):
                 return False, f"Could not connect to agent or agent returned error: {test_response.get('message', 'Unknown error')}", None
         except Exception as e:
@@ -409,7 +409,7 @@ AllowedIPs = {client_ip}/32
         return traffic_data
 
     # Modified: _install_candy_panel to self-register central server as agent
-    async def _install_candy_panel(self, server_ip: str,
+    def _install_candy_panel(self, server_ip: str,
                              wg_port: str,
                              wg_address_range: str = "10.0.0.1/24",
                              wg_dns: str = "8.8.8.8",
@@ -538,7 +538,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         # We need the server_id *before* adding the interface.
         
         # First, add the central server as a managed server
-        success_add_server, msg_add_server, new_server_id = await self.add_server(
+        success_add_server, msg_add_server, new_server_id =  self.add_server(
             name="Central Panel Server",
             ip_address=central_agent_ip,
             agent_port=central_agent_port,
@@ -589,7 +589,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
             return False, 'Wrong username or password!'
 
     # Modified: _dashboard_stats no longer takes server_id (it's called by agent locally or centrally calls agent)
-    async def _dashboard_stats(self) -> dict:
+    def _dashboard_stats(self) -> dict:
         """
         Retrieves various system and application statistics for the dashboard.
         This method will be called locally by the agent to get its server's stats.
@@ -620,7 +620,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         }
     
     # New: Helper to get live dashboard stats for a specific server (from agent)
-    async def _dashboard_stats_for_server(self, server_id: int) -> dict:
+    def _dashboard_stats_for_server(self, server_id: int) -> dict:
         """
         Fetches live dashboard statistics from a specific remote agent.
         """
@@ -628,14 +628,14 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         if not agent:
             return {"success": False, "message": f"Server with ID {server_id} not found or agent not configured."}
         try:
-            response = await agent.post("/dashboard")
+            response =  agent.post("/dashboard")
             return response # Returns the full API response (success, message, data)
         except Exception as e:
             return {"success": False, "message": f"Failed to get dashboard stats from agent: {e}"}
 
 
     # Modified: _get_all_clients now takes server_id
-    async def _get_all_clients(self, server_id: int | None = None) -> list[dict]:
+    def _get_all_clients(self, server_id: int | None = None) -> list[dict]:
         """
         Retrieves all client records from the database.
         If server_id is provided, it's for the central panel fetching clients for a specific server.
@@ -648,7 +648,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
 
 
     # Modified: _new_client now takes server_id for central panel, or operates locally on agent
-    async def _new_client(self, name: str, expire: str, traffic: str, wg_id: int = 0, note: str = '', server_id: int | None = None) -> tuple[bool, str]:
+    def _new_client(self, name: str, expire: str, traffic: str, wg_id: int = 0, note: str = '', server_id: int | None = None) -> tuple[bool, str]:
         """
         Creates a new WireGuard client.
         If server_id is provided (by central panel), it orchestrates creation via remote agent.
@@ -662,7 +662,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
 
             try:
                 # Delegate client creation to the remote agent
-                response = await agent.post("/client/create", {
+                response =  agent.post("/client/create", {
                     "name": name,
                     "expires": expire,
                     "traffic": traffic,
@@ -755,7 +755,7 @@ PersistentKeepalive = 25
             return True, client_config
 
     # Modified: _disable_client takes server_id or operates locally
-    async def _disable_client(self, client_name: str, server_id: int | None = None) -> tuple[bool, str]:
+    def _disable_client(self, client_name: str, server_id: int | None = None) -> tuple[bool, str]:
         """
         Disables a WireGuard client.
         If server_id is provided (by central panel), it orchestrates via remote agent.
@@ -771,7 +771,7 @@ PersistentKeepalive = 25
                 return False, f"Server with ID {server_id} not found or agent not configured."
             try:
                 # Delegate to agent
-                response = await agent.post("/client/update", {"name": client_name, "status": False})
+                response =  agent.post("/client/update", {"name": client_name, "status": False})
                 if response.get('success'):
                     self.db.update('clients', {'status': False}, {'name': client_name, 'server_id': server_id})
                     return True, response.get('message', f"Client '{client_name}' disabled successfully on server {server_id}.")
@@ -795,7 +795,7 @@ PersistentKeepalive = 25
             return True, f"Client '{client_name}' disabled successfully."
 
     # Modified: _delete_client takes server_id or operates locally
-    async def _delete_client(self, client_name: str, server_id: int | None = None) -> tuple[bool, str]:
+    def _delete_client(self, client_name: str, server_id: int | None = None) -> tuple[bool, str]:
         """
         Deletes a WireGuard client completely (DB and config).
         If server_id is provided (by central panel), it orchestrates via remote agent.
@@ -810,7 +810,7 @@ PersistentKeepalive = 25
             if not agent:
                 return False, f"Server with ID {server_id} not found or agent not configured."
             try:
-                response = await agent.post("/client/delete", {"name": client_name})
+                response =  agent.post("/client/delete", {"name": client_name})
                 if response.get('success'):
                     self.db.delete('clients', {'name': client_name, 'server_id': server_id})
                     return True, response.get('message', f"Client '{client_name}' deleted successfully from server {server_id}.")
@@ -834,7 +834,7 @@ PersistentKeepalive = 25
 
 
     # Modified: _edit_client takes server_id or operates locally
-    async def _edit_client(self, name: str, expire: str = None, traffic: str = None, status: bool = None, note: str = None, server_id: int | None = None) -> tuple[bool, str]:
+    def _edit_client(self, name: str, expire: str = None, traffic: str = None, status: bool = None, note: str = None, server_id: int | None = None) -> tuple[bool, str]:
         """
         Edits an existing client's details.
         If server_id is provided (by central panel), it orchestrates via remote agent.
@@ -856,7 +856,7 @@ PersistentKeepalive = 25
             if note is not None: update_data_agent['note'] = note
 
             try:
-                response = await agent.post("/client/update", update_data_agent)
+                response =  agent.post("/client/update", update_data_agent)
                 if response.get('success'):
                     # Update central DB
                     update_data_central = {}
@@ -907,7 +907,7 @@ PersistentKeepalive = 25
 
 
     # Modified: _new_interface_wg takes server_id or operates locally
-    async def _new_interface_wg(self, address_range: str, port: int, server_id: int | None = None) -> tuple[bool, str]:
+    def _new_interface_wg(self, address_range: str, port: int, server_id: int | None = None) -> tuple[bool, str]:
         """
         Creates a new WireGuard interface configuration.
         If server_id is provided (by central panel), it orchestrates via remote agent.
@@ -919,7 +919,7 @@ PersistentKeepalive = 25
                 return False, f"Server with ID {server_id} not found or agent not configured."
 
             # Check for existing port or address range conflicts on the target server
-            existing_interfaces = await asyncio.to_thread(self.db.select, 'interfaces', where={'server_id': server_id})
+            existing_interfaces =  self.db.select('interfaces', where={'server_id': server_id})
             for interface in existing_interfaces:
                 if int(interface['port']) == port:
                     return False, f"An interface with port {port} already exists on server {server_id}."
@@ -927,7 +927,7 @@ PersistentKeepalive = 25
                     return False, f"An interface with address range {address_range} already exists on server {server_id}."
 
             try:
-                response = await agent.post("/interface/create", {"address_range": address_range, "port": port})
+                response =  agent.post("/interface/create", {"address_range": address_range, "port": port})
                 if response.get('success'):
                     # Agent successfully created interface, now store its details in central DB
                     interface_details = response['data'] # Agent now returns these details explicitly
@@ -1021,7 +1021,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
 
 
     # Modified: _edit_interface takes server_id or operates locally
-    async def _edit_interface(self, name: str, address: str = None, port: int = None, status: bool = None, server_id: int | None = None) -> tuple[bool, str]:
+    def _edit_interface(self, name: str, address: str = None, port: int = None, status: bool = None, server_id: int | None = None) -> tuple[bool, str]:
         """
         Edits an existing WireGuard interface configuration.
         If server_id is provided (by central panel), it orchestrates via remote agent.
@@ -1043,7 +1043,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
             if status is not None: update_data_agent['status'] = status
 
             try:
-                response = await agent.post("/interface/update", update_data_agent)
+                response =  agent.post("/interface/update", update_data_agent)
                 if response.get('success'):
                     # Update central DB
                     update_data_central = {}
@@ -1118,7 +1118,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                 return False, f"Error editing interface {name}: {e}"
 
     # Modified: _delete_interface takes server_id or operates locally
-    async def _delete_interface(self, wg_id: int, server_id: int | None = None) -> tuple[bool, str]:
+    def _delete_interface(self, wg_id: int, server_id: int | None = None) -> tuple[bool, str]:
         """
         Deletes a WireGuard interface.
         If server_id is provided (by central panel), it orchestrates via remote agent.
@@ -1134,7 +1134,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                 return False, f"Server with ID {server_id} not found or agent not configured."
 
             try:
-                response = await agent.post("/interface/delete", {"wg_id": wg_id})
+                response =  agent.post("/interface/delete", {"wg_id": wg_id})
                 if response.get('success'):
                     self.db.delete('interfaces', {'wg': wg_id, 'server_id': server_id})
                     # Also delete associated clients from central DB
@@ -1182,7 +1182,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
 
 
     # Modified: _get_client_config takes server_id or operates locally
-    async def _get_client_config(self, name: str, server_id: int | None = None) -> tuple[bool, str]:
+    def _get_client_config(self, name: str, server_id: int | None = None) -> tuple[bool, str]:
         """
         Generates and returns the WireGuard client configuration.
         If server_id is provided (by central panel), it retrieves config via remote agent.
@@ -1197,7 +1197,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
             if not agent:
                 return False, f"Server with ID {server_id} not found or agent not configured."
             try:
-                response = await agent.post("/client/get_config", {"name": name})
+                response =  agent.post("/client/get_config", {"name": name})
                 if response.get('success'):
                     return True, response['data']['config']
                 return False, response.get('message', f"Failed to get config for client '{name}' from agent.")
@@ -1528,7 +1528,7 @@ PersistentKeepalive = 25
         return False # Invalid action
 
     # Modified: _calculate_and_update_traffic now takes server_id or operates locally
-    async def _calculate_and_update_traffic(self, server_id: int | None = None):
+    def _calculate_and_update_traffic(self, server_id: int | None = None):
         """
         Calculates and updates cumulative traffic for all clients.
         If server_id is provided (by central panel), it queries agent for live traffic and updates central DB.
@@ -1542,7 +1542,7 @@ PersistentKeepalive = 25
 
             try:
                 # Get current traffic for all peers from the agent
-                response = await agent.post("/traffic/dump")
+                response =  agent.post("/traffic/dump")
                 if not response.get('success') or not response.get('data'):
                     print(f"Error fetching traffic dump from agent {server_id}: {response.get('message', 'No data')}")
                     return
@@ -1678,7 +1678,7 @@ PersistentKeepalive = 25
 
 
     # Modified: _sync now takes server_id (for central panel to sync remote server) or operates locally (for agent's cron)
-    async def _sync(self, server_id: int | None = None):
+    def _sync(self, server_id: int | None = None):
         """
         Synchronizes client data, traffic, and performs scheduled tasks.
         If server_id is provided, central panel initiates sync on a remote agent.
@@ -1692,13 +1692,13 @@ PersistentKeepalive = 25
 
             print(f"[*] Initiating sync on remote server {server_id}...")
             try:
-                response = await agent.post("/sync")
+                response =  agent.post("/sync")
                 if response.get('success'):
                     print(f"[*] Remote sync initiated successfully on server {server_id}.")
                     # After remote sync, pull traffic data and update central DB
-                    await self._calculate_and_update_traffic(server_id)
+                    self._calculate_and_update_traffic(server_id)
                     # Pull dashboard stats and update central DB cache
-                    dashboard_stats_from_agent_response = await agent.post("/dashboard")
+                    dashboard_stats_from_agent_response =  agent.post("/dashboard")
                     if dashboard_stats_from_agent_response.get('success') and dashboard_stats_from_agent_response.get('data'):
                         self.db.update('servers',
                                        {'status': 'active',
@@ -1797,9 +1797,9 @@ PersistentKeepalive = 25
 
             for client_name_to_disable in clients_to_disable:
                 print(f"[!] Client '{client_name_to_disable}' needs disabling. Disabling...")
-                await self._disable_client(client_name_to_disable) # Agent's local _disable_client call
+                self._disable_client(client_name_to_disable) # Agent's local _disable_client call
 
-            await self._calculate_and_update_traffic() # Agent's local traffic calculation
+            self._calculate_and_update_traffic() # Agent's local traffic calculation
 
             boot_time_timestamp = psutil.boot_time()
             current_timestamp = time.time()
@@ -1814,7 +1814,7 @@ PersistentKeepalive = 25
                 print(f"[*] Updated ap_port in settings to reflect environment variable: {actual_ap_port}")
             print("[*] Fetching and caching local dashboard stats for self-registered server...")
             try:
-                local_dashboard_stats = await self._dashboard_stats() # Get local stats
+                local_dashboard_stats =  self._dashboard_stats() # Get local stats
                 # Assuming the central panel itself is server_id = 1
                 self.db.update('servers',
                                {'status': 'active', # Ensure local server is marked active
