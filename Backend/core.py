@@ -26,7 +26,7 @@ class RemoteAgentClient:
     def post(self, endpoint: str, data: dict = None):
         headers = {"X-API-Key": self.api_key, "Content-Type": "application/json"}
         try:
-            with httpx.AsyncClient() as client:
+            with httpx.Client() as client:
                 response =  client.post(f"{self.base_url}{endpoint}", json=data, headers=headers, timeout=30)
                 response.raise_for_status() # Raise an exception for 4xx/5xx responses
                 return response.json()
