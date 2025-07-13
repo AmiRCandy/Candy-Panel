@@ -6,12 +6,18 @@ REPO_URL="https://github.com/AmiRCandy/Candy-Panel.git"
 PROJECT_ROOT="/var/www/$PROJECT_NAME"
 BACKEND_DIR="$PROJECT_ROOT/Backend"
 FRONTEND_DIR="$PROJECT_ROOT/Frontend"
-FLASK_APP_ENTRY="main.py" # Ensure this is the file where your Flask app is defined and serves static files
+FLASK_APP_ENTRY="main.py"
+AGENT_APP_ENTRY="agent.py" # New: Agent app entry point
 LINUX_USER=$(whoami)
 # --- Backend specific configuration ---
 # Flask will now serve both frontend and backend on this port
 BACKEND_HOST="0.0.0.0"
 BACKEND_PORT="3446" # This will be the publicly accessible port for everything
+
+# New: Agent specific configuration for the central server's self-managed agent
+AGENT_PORT="1212" # Default port for the local agent on the central server
+# Generate a unique API key for the central server's agent. This is passed via env var.
+AGENT_API_KEY_CENTRAL=$(openssl rand -base64 32) # Generate a strong API key
 
 # NVM specific
 NVM_VERSION="v0.40.3" # Always check https://github.com/nvm-sh/nvm for the latest version
@@ -219,25 +225,30 @@ clone_or_update_repo() {
 }
 
 deploy_backend() {
-    print_info "--- Deploying Flask Backend ---"
+    print_info "--- Deploying Flask Backend (Central Panel & Local Agent) ---"
     sleep 1
 
     print_info "Navigating to backend directory: $BACKEND_DIR"
     cd "$BACKEND_DIR" || { print_error "Backend directory not found: $BACKEND_DIR"; exit 1; }
 
+    # New: Copy agent.py (and updated db.py, core.py if not already in Backend)
+    # Assuming agent.py is generated in a separate step or copied to project root
+    # For simplicity of this script, let's assume agent.py is available in the root
+    # or should be moved from a hypothetical 'Agent' directory if it exists.
+    # For now, let's assume agent.py gets copied into BACKEND_DIR along with core.py and db.py
+    # if it's part of the same repo structure.
+    # We will ensure agent.py is runnable from here.
+
     print_info "Creating and activating Python virtual environment..."
-    # Use the discovered Python executable
     python3 -m venv venv || { print_error "Failed to create virtual environment."; exit 1; }
     source venv/bin/activate || { print_error "Failed to activate virtual environment."; exit 1; }
     print_success "Virtual environment activated."
     sleep 1
 
-    print_info "Installing Python dependencies (Flask etc.)..."
-    # Install netifaces with required build dependencies if needed
+    print_info "Installing Python dependencies (Flask, httpx etc.)..."
     pip install pyrogram flask[async] requests flask_cors psutil httpx tgcrypto nanoid || { print_error "Failed to install Python dependencies."; exit 1; }
     print_info "Attempting to install netifaces specifically, including build dependencies..."
     
-    # Try installing netifaces with potential build dependencies for different distros
     if command -v apt &> /dev/null; then
         sudo apt install -y python3-netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-dev installations."; exit 1; }
         pip install netifaces || { print_error "Failed to install netifaces. Check build-essential and python3-dev installations."; exit 1; }
@@ -251,10 +262,11 @@ deploy_backend() {
     print_success "Python dependencies installed."
     sleep 1
 
-    print_info "Creating Systemd service file for Flask..."
+    # --- Systemd Service for Central Flask Panel ---
+    print_info "Creating Systemd service file for Central Flask Panel..."
     sudo tee "/etc/systemd/system/${PROJECT_NAME}_flask.service" > /dev/null <<EOF
 [Unit]
-Description=Flask instance for ${PROJECT_NAME}
+Description=Flask instance for ${PROJECT_NAME} Central Panel
 After=network.target
 
 [Service]
@@ -262,8 +274,9 @@ User=$LINUX_USER
 Group=$LINUX_USER
 WorkingDirectory=$BACKEND_DIR
 Environment="FLASK_APP=$FLASK_APP_ENTRY"
-Environment="FLASK_RUN_HOST=$BACKEND_HOST"
-Environment="FLASK_RUN_PORT=$BACKEND_PORT"
+Environment="AP_PORT=$BACKEND_PORT" # Main Panel HTTP Port
+Environment="AGENT_PORT=$AGENT_PORT" # Local Agent HTTP Port
+Environment="AGENT_API_KEY_CENTRAL=$AGENT_API_KEY_CENTRAL" # API key for local agent
 ExecStart=$BACKEND_DIR/venv/bin/python3 $FLASK_APP_ENTRY
 Restart=always
 RestartSec=5s
@@ -271,18 +284,45 @@ RestartSec=5s
 [Install]
 WantedBy=multi-user.target
 EOF
-    print_success "Systemd service file created."
+    print_success "Systemd service file created for Central Panel."
     sleep 1
 
-    print_info "Reloading Systemd daemon, enabling and starting Flask service..."
+    # --- Systemd Service for Local Agent on Central Server ---
+    print_info "Creating Systemd service file for Local Agent on Central Server..."
+    sudo tee "/etc/systemd/system/${PROJECT_NAME}_agent.service" > /dev/null <<EOF
+[Unit]
+Description=CandyPanel Local Agent Service
+After=network.target
+
+[Service]
+User=$LINUX_USER
+Group=$LINUX_USER
+WorkingDirectory=$BACKEND_DIR # Agent code is now in Backend directory
+Environment="AGENT_PORT=$AGENT_PORT"
+Environment="AGENT_API_KEY=$AGENT_API_KEY_CENTRAL" # Agent uses this as its API key
+ExecStart=$BACKEND_DIR/venv/bin/python3 $AGENT_APP_ENTRY
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    print_success "Systemd service file created for Local Agent."
+    sleep 1
+
+    print_info "Reloading Systemd daemon, enabling and starting Flask and Agent services..."
     sudo systemctl daemon-reload || { print_error "Failed to reload Systemd daemon."; exit 1; }
     sudo systemctl enable "${PROJECT_NAME}_flask.service" || { print_error "Failed to enable Flask service."; exit 1; }
+    sudo systemctl enable "${PROJECT_NAME}_agent.service" || { print_error "Failed to enable Agent service."; exit 1; }
     sudo systemctl enable cron
     sudo systemctl start "${PROJECT_NAME}_flask.service" || { print_error "Failed to start Flask service."; exit 1; }
+    sudo systemctl start "${PROJECT_NAME}_agent.service" || { print_error "Failed to start Agent service."; exit 1; }
     sudo systemctl start cron
-    print_success "Flask service started and enabled to run on boot."
-    print_info "You can check its status with: sudo systemctl status ${PROJECT_NAME}_flask.service"
-    print_info "View logs with: journalctl -u ${PROJECT_NAME}_flask.service --since '1 hour ago'"
+    print_success "Flask and Agent services started and enabled to run on boot."
+    print_info "You can check Central Panel status with: sudo systemctl status ${PROJECT_NAME}_flask.service"
+    print_info "You can check Local Agent status with: sudo systemctl status ${PROJECT_NAME}_agent.service"
+    print_info "View Central Panel logs with: journalctl -u ${PROJECT_NAME}_flask.service --since '1 hour ago'"
+    print_info "View Local Agent logs with: journalctl -u ${PROJECT_NAME}_agent.service --since '1 hour ago'"
     sleep 2
 }
 
@@ -312,7 +352,7 @@ configure_frontend_api_url() {
     sleep 1
 
     local server_ip
-    read -p "$(echo -e "${YELLOW}INPUT:${RESET} Enter your server's public IP address (e.g., 192.168.1.100) or domain name if using one: ")" server_ip
+    read -p "$(echo -e "${YELLOW}INPUT:${RESET} Enter your server's public IP address (e.g., 192.168.1.100) or domain name if using one for the Central Panel: ")" server_ip
     if [ -z "$server_ip" ]; then
         print_error "Server IP/Domain cannot be empty. Exiting."
         exit 1
@@ -321,8 +361,8 @@ configure_frontend_api_url() {
     local frontend_api_url="http://$server_ip:$BACKEND_PORT"
 
     print_info "Writing frontend environment variable VITE_APP_API_URL to .env.production..."
-    echo "export VITE_APP_API_URL=$frontend_api_url" | sudo tee "$FRONTEND_DIR/.env.production" > /dev/null || { print_error "Failed to write .env.production file. Check permissions."; exit 1; }
-    echo "export AP_PORT=$BACKEND_PORT" | sudo tee "$FRONTEND_DIR/.env.production" > /dev/null || { print_error "Failed to write .env.production file. Check permissions."; exit 1; }
+    echo "VITE_APP_API_URL=$frontend_api_url" | sudo tee "$FRONTEND_DIR/.env.production" > /dev/null || { print_error "Failed to write .env.production file. Check permissions."; exit 1; }
+    echo "AP_PORT=$BACKEND_PORT" | sudo tee -a "$FRONTEND_DIR/.env.production" > /dev/null || { print_error "Failed to append AP_PORT to .env.production file. Check permissions."; exit 1; }
     print_success ".env.production created/updated with VITE_APP_API_URL=$frontend_api_url"
     sudo chown "$LINUX_USER:$LINUX_USER" "$FRONTEND_DIR/.env.production" || { print_warning "Could not change ownership of .env.production. Manual intervention might be needed for permissions."; }
     sleep 1
@@ -358,6 +398,11 @@ configure_firewall() {
     sudo ufw allow "$BACKEND_PORT"/tcp || { print_error "Failed to allow port $BACKEND_PORT through UFW."; exit 1; }
     print_success "Port $BACKEND_PORT allowed for external access."
 
+    # New: Allow access to the local agent's port from localhost (or if exposed)
+    print_info "Allowing access to local agent's port $AGENT_PORT (usually from localhost only)..."
+    sudo ufw allow from 127.0.0.1 to any port "$AGENT_PORT" proto tcp || { print_warning "Failed to allow localhost access to agent port $AGENT_PORT. This might cause issues for central panel self-management."; }
+    print_success "Local agent port $AGENT_PORT allowed."
+
     print_info "You can check UFW status with: sudo ufw status"
     sleep 2
 }
@@ -388,6 +433,7 @@ uninstall_backend_service() {
     sleep 1
 
     local service_name="${PROJECT_NAME}_flask.service"
+    local agent_service_name="${PROJECT_NAME}_agent.service" # New: Agent service
 
     if sudo systemctl is-active --quiet "$service_name"; then
         print_info "Stopping Flask service: $service_name..."
@@ -395,6 +441,14 @@ uninstall_backend_service() {
         print_success "Flask service stopped."
     else
         print_info "Flask service '$service_name' is not active."
+    fi
+
+    if sudo systemctl is-active --quiet "$agent_service_name"; then
+        print_info "Stopping Agent service: $agent_service_name..."
+        sudo systemctl stop "$agent_service_name" || { print_warning "Failed to stop Agent service. It might not be running."; }
+        print_success "Agent service stopped."
+    else
+        print_info "Agent service '$agent_service_name' is not active."
     fi
 
     if sudo systemctl is-enabled --quiet "$service_name"; then
@@ -405,12 +459,30 @@ uninstall_backend_service() {
         print_info "Flask service '$service_name' is not enabled."
     fi
 
+    if sudo systemctl is-enabled --quiet "$agent_service_name"; then
+        print_info "Disabling Agent service: $agent_service_name..."
+        sudo systemctl disable "$agent_service_name" || { print_warning "Failed to disable Agent service. It might already be disabled."; }
+        print_success "Agent service disabled."
+    else
+        print_info "Agent service '$agent_service_name' is not enabled."
+    fi
+
+
     if [ -f "/etc/systemd/system/$service_name" ]; then
         print_info "Removing Systemd service file: /etc/systemd/system/$service_name..."
         sudo rm "/etc/systemd/system/$service_name" || { print_error "Failed to remove Systemd service file."; exit 1; }
         print_success "Systemd service file removed."
     else
         print_info "Systemd service file '/etc/systemd/system/$service_name' not found."
+    fi
+
+    # New: Remove Agent service file
+    if [ -f "/etc/systemd/system/$agent_service_name" ]; then
+        print_info "Removing Systemd service file: /etc/systemd/system/$agent_service_name..."
+        sudo rm "/etc/systemd/system/$agent_service_name" || { print_error "Failed to remove Agent Systemd service file."; exit 1; }
+        print_success "Agent Systemd service file removed."
+    else
+        print_info "Agent Systemd service file '/etc/systemd/system/$agent_service_name' not found."
     fi
     
     print_info "Reloading Systemd daemon..."
@@ -447,6 +519,17 @@ remove_firewall_rules() {
         else
             print_info "No UFW rule found for port $BACKEND_PORT."
         fi
+
+        # New: Remove rule for local agent port
+        print_info "Checking for UFW rule for local agent port $AGENT_PORT..."
+        if sudo ufw status | grep -q "ALLOW IN.*$AGENT_PORT/tcp"; then
+            print_info "Deleting UFW rule for port $AGENT_PORT..."
+            sudo ufw delete allow from 127.0.0.1 to any port "$AGENT_PORT" proto tcp || { print_warning "Failed to delete UFW rule for agent port $AGENT_PORT. Manual removal might be needed."; }
+            print_success "UFW rule for agent port $AGENT_PORT removed."
+        else
+            print_info "No UFW rule found for agent port $AGENT_PORT."
+        fi
+
     else
         print_info "UFW is not active. No firewall rules to remove via UFW."
     fi
@@ -557,13 +640,13 @@ uninstall_wireguard() {
 # --- Main Install/Update/Uninstall Logic ---
 run_install() {
     print_header "Candy Panel Deployment Script"
-    confirm_action "This script will deploy your Candy panel with Flask serving both frontend and backend. Ensure you have updated the REPO_URL variable in the script."
+    confirm_action "This script will deploy your Candy panel with Flask serving both frontend and backend, AND a local agent for self-management. Ensure you have updated the REPO_URL variable in the script."
 
     check_prerequisites
     setup_permissions
     install_nodejs_with_nvm
     clone_or_update_repo
-    deploy_backend
+    deploy_backend # This now deploys both Flask app and local agent
     deploy_frontend
     configure_frontend_api_url
     configure_firewall
@@ -574,6 +657,8 @@ run_install() {
     echo -e "${BOLD}${GREEN} Your Candy Panel should now be accessible at:${RESET}"
     echo -e "${BOLD}${GREEN} http://YOUR_SERVER_IP:$BACKEND_PORT${RESET}"
     print_warning "Remember to replace YOUR_SERVER_IP with your actual server's public IP address."
+    print_warning "The local agent is running on port $AGENT_PORT with API Key: $AGENT_API_KEY_CENTRAL"
+    print_warning "This API key has been automatically registered in your central panel for self-management."
     print_warning "Note: SSL is NOT configured with this setup. For HTTPS, you will need to add a reverse proxy like Nginx or Caddy."
     echo -e "${BOLD}${GREEN}====================================================${RESET}\n"
     print_info "Ensure the Linux user '$LINUX_USER' has appropriate permissions for WireGuard operations."
@@ -584,7 +669,11 @@ run_uninstall() {
     print_header "Candy Panel UNINSTALL Script"
     confirm_action "This script will attempt to UNINSTALL the Candy Panel project. This includes stopping services, removing files, and reverting firewall rules. Proceed with uninstallation?"
 
-    get_backend_port
+    get_backend_port # This populates BACKEND_PORT, AGENT_PORT
+    
+    # Need to set AGENT_PORT for uninstall too if it was dynamically assigned
+    # For now, rely on default if not explicitly set by user.
+    AGENT_PORT="${AGENT_PORT:-3447}" # Default if not found from env
 
     uninstall_backend_service
     remove_project_directory
@@ -607,6 +696,7 @@ run_update() {
 
     print_info "--- Stopping Services for Update ---"
     sudo systemctl stop "${PROJECT_NAME}_flask.service" || print_warning "Flask service might not be running or failed to stop."
+    sudo systemctl stop "${PROJECT_NAME}_agent.service" || print_warning "Agent service might not be running or failed to stop."
     print_success "Services stopped."
     sleep 1
 
@@ -617,7 +707,6 @@ run_update() {
     source venv/bin/activate || { print_error "Failed to activate virtual environment. Cannot update backend dependencies."; exit 1; }
     pip install -r requirements.txt || { print_warning "Failed to install Python dependencies from requirements.txt. Attempting direct install..."; pip install pyrogram flask[async] requests flask_cors psutil || { print_error "Failed to install Python dependencies directly."; exit 1; }; }
     
-    # Re-attempt netifaces installation during update
     print_info "Attempting to install netifaces specifically during update..."
     if command -v apt &> /dev/null; then
         sudo apt install -y python3-netifaces || pip install netifaces || print_warning "Failed to install netifaces during update. Manual intervention might be needed."
@@ -637,9 +726,12 @@ run_update() {
 
     print_info "--- Starting Services after Update ---"
     sudo systemctl start "${PROJECT_NAME}_flask.service" || { print_error "Failed to start Flask service after update."; exit 1; }
-    print_success "Flask service started."
-    print_info "You can check its status with: sudo systemctl status ${PROJECT_NAME}_flask.service"
-    print_info "View logs with: journalctl -u ${PROJECT_NAME}_flask.service --since '1 hour ago'"
+    sudo systemctl start "${PROJECT_NAME}_agent.service" || { print_error "Failed to start Agent service after update."; exit 1; }
+    print_success "Flask and Agent services started."
+    print_info "You can check Central Panel status with: sudo systemctl status ${PROJECT_NAME}_flask.service"
+    print_info "You can check Local Agent status with: sudo systemctl status ${PROJECT_NAME}_agent.service"
+    print_info "View Central Panel logs with: journalctl -u ${PROJECT_NAME}_flask.service --since '1 hour ago'"
+    print_info "View Local Agent logs with: journalctl -u ${PROJECT_NAME}_agent.service --since '1 hour ago'"
     sleep 2
 
     echo -e "\n${BOLD}${GREEN}====================================================${RESET}"
@@ -665,6 +757,10 @@ show_menu() {
 }
 
 # --- Main execution ---
+# New: Ensure AGENT_PORT and AGENT_API_KEY_CENTRAL are set for install/update/uninstall
+export AGENT_PORT="${AGENT_PORT:-3447}" # Default if not set externally
+export AGENT_API_KEY_CENTRAL="${AGENT_API_KEY_CENTRAL:-$(openssl rand -base64 32)}" # Generate if not set
+
 while true; do
     show_menu
     case $choice in

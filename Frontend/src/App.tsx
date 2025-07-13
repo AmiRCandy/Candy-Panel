@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Server,
+  Server as ServerIcon, // Renamed to avoid conflict with interface Server
   Users,
   Settings,
   Activity,
@@ -20,11 +20,13 @@ import {
   LogOut,
   Shield,
   Link2,
-  Bot, // New icon for Telegram Bot
-  Key // New icon for API Tokens
+  Bot,
+  Key,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { apiClient } from './utils/api';
-import { Client, Interface, AllData, ApiTokens } from './types';
+import { Client, Interface, AllData, ApiTokens, Server, DashboardStats } from './types';
 
 interface TabButtonProps {
   icon: React.ReactNode;
@@ -69,18 +71,20 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [data, setData] = useState<AllData | null>(null);
-  const [loading, setLoading] = useState(true); // Set to true initially for first load
+  const [data, setData] = useState<AllData | null>(null); // Data for the selected server
+  const [allServers, setAllServers] = useState<Server[]>([]); // List of all registered servers
+  const [selectedServerId, setSelectedServerId] = useState<number | null>(null); // Currently selected server
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
-  const initialLoadRef = useRef(true); // Ref to track the very first data load
+  const initialLoadRef = useRef(true);
 
   // Auth form states
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Install form states
+  // Install form states (for central panel installation)
   const [serverIp, setServerIp] = useState('');
   const [wgPort, setWgPort] = useState('51820');
   const [wgAddressRange, setWgAddressRange] = useState('10.0.0.1/24');
@@ -94,24 +98,40 @@ function App() {
   const [clientName, setClientName] = useState('');
   const [clientExpires, setClientExpires] = useState('');
   const [clientTraffic, setClientTraffic] = useState('');
-  const [clientWgId, setClientWgId] = useState('0');
+  const [clientWgId, setClientWgId] = useState('0'); // WG interface ID on the remote server
   const [clientNote, setClientNote] = useState('');
-  const [clientStatus, setClientStatus] = useState(true); // New state for client status
+  const [clientStatus, setClientStatus] = useState(true);
 
   // Interface form states
   const [showInterfaceForm, setShowInterfaceForm] = useState(false);
   const [interfaceAddressRange, setInterfaceAddressRange] = useState('');
   const [interfacePort, setInterfacePort] = useState('');
-  const [showEditInterfaceForm, setShowEditInterfaceForm] = useState(false); // New state for editing interface
+  const [showEditInterfaceForm, setShowEditInterfaceForm] = useState(false);
   const [editingInterface, setEditingInterface] = useState<Interface | null>(null);
   const [editInterfaceAddressRange, setEditInterfaceAddressRange] = useState('');
   const [editInterfacePort, setEditInterfacePort] = useState('');
   const [editInterfaceStatus, setEditInterfaceStatus] = useState(true);
 
+  // Server management form states
+  const [showAddServerForm, setShowAddServerForm] = useState(false);
+  const [newServerName, setNewServerName] = useState('');
+  const [newServerIp, setNewServerIp] = useState('');
+  const [newAgentPort, setNewAgentPort] = useState('3447');
+  const [newApiKey, setNewApiKey] = useState('');
+  const [newServerDescription, setNewServerDescription] = useState('');
+  const [showEditServerForm, setShowEditServerForm] = useState(false);
+  const [editingServer, setEditingServer] = useState<Server | null>(null);
+  const [editServerName, setEditServerName] = useState('');
+  const [editServerIp, setEditServerIp] = useState('');
+  const [editAgentPort, setEditAgentPort] = useState('');
+  const [editApiKey, setEditApiKey] = useState(''); // Allow editing API key if needed
+  const [editServerDescription, setEditServerDescription] = useState('');
+  const [editServerStatus, setEditServerStatus] = useState<string>('active');
+
   // Settings states
   const [settingsValues, setSettingsValues] = useState<Record<string, string>>({});
-  const [stagedSettings, setStagedSettings] = useState<Record<string, string>>({}); // New state for settings changes
-  const [apiTokens, setApiTokens] = useState<ApiTokens>({}); // New state for API tokens
+  const [stagedSettings, setStagedSettings] = useState<Record<string, string>>({});
+  const [apiTokens, setApiTokens] = useState<ApiTokens>({});
   const [newApiTokenName, setNewApiTokenName] = useState('');
   const [newApiTokenValue, setNewApiTokenValue] = useState('');
   const [showApiTokenForm, setShowApiTokenForm] = useState(false);
@@ -122,17 +142,24 @@ function App() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      if (activeTab === 'dashboard') {
-        loadData(); // Initial load
-      }
+      // Load all servers first
+      loadServers();
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated && selectedServerId !== null) {
+      // Load data for the selected server
+      loadServerData(selectedServerId, true); // Initial load for selected server
       const interval = setInterval(() => {
-        if (activeTab === 'dashboard') {
-          loadData(false); // Subsequent loads, don't show full loading state on failure
+        if (activeTab === 'dashboard' || activeTab === 'clients') {
+          loadServerData(selectedServerId, false); // Subsequent loads, don't show full loading
         }
       }, 5000); // Fetch every 5 seconds
-      return () => clearInterval(interval); // Clean up on unmount
+      return () => clearInterval(interval);
     }
-  }, [isAuthenticated, activeTab]);
+  }, [isAuthenticated, selectedServerId, activeTab]);
+
 
   const checkAuth = async () => {
     try {
@@ -142,23 +169,46 @@ function App() {
       if (installed && apiClient.isAuthenticated()) {
         setIsAuthenticated(true);
       } else {
-        setLoading(false); // If not authenticated, stop loading immediately
+        setLoading(false);
       }
     } catch (err) {
       console.error('Auth check failed:', err);
-      setLoading(false); // If auth check fails, stop loading
+      setLoading(false);
     }
   };
 
-  const loadData = async (showFullLoading = true) => {
+  const loadServers = async () => {
+    setLoading(true);
+    try {
+      const response = await apiClient.getServers();
+      if (response.success && response.data) {
+        setAllServers(response.data.servers);
+        if (response.data.servers.length > 0 && selectedServerId === null) {
+          // Auto-select the first server if none is selected
+          setSelectedServerId(response.data.servers[0].server_id);
+        } else if (response.data.servers.length === 0) {
+          setSelectedServerId(null); // No servers to select
+        }
+      } else {
+        setError(response.message || 'Failed to load servers.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load servers');
+      console.error('Error loading servers:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadServerData = async (serverId: number, showFullLoading = true) => {
     if (showFullLoading || initialLoadRef.current) {
       setLoading(true);
     }
     try {
-      const response = await apiClient.getAllData();
+      const response = await apiClient.getServerData(serverId);
       if (response.success && response.data) {
         setData(response.data);
-        setSettingsValues(response.data.settings);
+        setSettingsValues(response.data.settings); // Central settings
         setStagedSettings(response.data.settings); // Initialize staged settings
         try {
           const parsedApiTokens = JSON.parse(response.data.settings.api_tokens || '{}');
@@ -168,16 +218,17 @@ function App() {
           setApiTokens({});
         }
       } else {
-        // If data load fails, and it's not the initial load, keep previous data
-        if (initialLoadRef.current) {
-          setError(response.message || 'Failed to load data.');
+        if (showFullLoading) {
+          setError(response.message || `Failed to load data for server ${serverId}.`);
+          setData(null); // Clear data if loading fails
         }
       }
     } catch (err) {
-      if (initialLoadRef.current) {
-        setError(err instanceof Error ? err.message : 'Failed to load data');
+      if (showFullLoading) {
+        setError(err instanceof Error ? err.message : `Failed to load data for server ${serverId}`);
+        setData(null); // Clear data if loading fails
       }
-      console.error('Error loading data:', err);
+      console.error(`Error loading data for server ${serverId}:`, err);
     } finally {
       if (showFullLoading || initialLoadRef.current) {
         setLoading(false);
@@ -207,8 +258,8 @@ function App() {
       const response = await apiClient.login(username, password);
       if (response.success) {
         setIsAuthenticated(true);
-        // loadData will be called by useEffect after isAuthenticated changes
         showMessage('Login successful!');
+        // loadServers will be called by useEffect after isAuthenticated changes
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Login failed', true);
@@ -232,7 +283,7 @@ function App() {
       if (response.success) {
         setIsInstalled(true);
         showMessage('Installation completed successfully!');
-        // No need to call loadData here, checkAuth will handle it
+        // checkAuth will re-run and handle authentication after install
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Installation failed', true);
@@ -243,11 +294,15 @@ function App() {
 
   const handleClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (selectedServerId === null) {
+      showMessage('Please select a server first.', true);
+      return;
+    }
     try {
       setLoading(true);
       const trafficInBytes = (parseFloat(clientTraffic) * 1024 * 1024).toString();
       if (editingClient) {
-        const response = await apiClient.updateClient({
+        const response = await apiClient.updateClient(selectedServerId, {
           name: editingClient.name,
           expires: clientExpires,
           traffic: trafficInBytes,
@@ -258,7 +313,7 @@ function App() {
           showMessage('Client updated successfully!');
         }
       } else {
-        const response = await apiClient.createClient({
+        const response = await apiClient.createClient(selectedServerId, {
           name: clientName,
           expires: clientExpires,
           traffic: trafficInBytes,
@@ -271,7 +326,7 @@ function App() {
       }
 
       resetClientForm();
-      await loadData();
+      await loadServerData(selectedServerId);
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Operation failed', true);
     } finally {
@@ -281,9 +336,13 @@ function App() {
 
   const handleInterfaceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (selectedServerId === null) {
+      showMessage('Please select a server first.', true);
+      return;
+    }
     try {
       setLoading(true);
-      const response = await apiClient.createInterface({
+      const response = await apiClient.createInterface(selectedServerId, {
         address_range: interfaceAddressRange,
         port: parseInt(interfacePort),
       });
@@ -292,7 +351,7 @@ function App() {
         setShowInterfaceForm(false);
         setInterfaceAddressRange('');
         setInterfacePort('');
-        await loadData();
+        await loadServerData(selectedServerId);
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Interface creation failed', true);
@@ -317,21 +376,25 @@ function App() {
     setClientName(client.name);
     setClientExpires(client.expires.split('T')[0]);
     setClientTraffic(client.traffic);
-    setClientWgId(client.wg.toString());
+    setClientWgId(client.wg ? client.wg.toString() : '0'); // Ensure wg_id is string
     setClientNote(client.note);
     setClientStatus(client.status);
     setShowClientForm(true);
   };
 
-  const deleteClient = async (name: string) => {
-    if (!confirm(`Are you sure you want to delete client "${name}"?`)) return;
+  const deleteClient = async (clientName: string) => {
+    if (!confirm(`Are you sure you want to delete client "${clientName}" from server ${selectedServerId}?`)) return;
+    if (selectedServerId === null) {
+      showMessage('No server selected.', true);
+      return;
+    }
 
     try {
       setLoading(true);
-      const response = await apiClient.deleteClient(name);
+      const response = await apiClient.deleteClient(selectedServerId, clientName);
       if (response.success) {
         showMessage('Client deleted successfully!');
-        await loadData();
+        await loadServerData(selectedServerId);
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Delete failed', true);
@@ -340,15 +403,19 @@ function App() {
     }
   };
 
-  const downloadConfig = async (name: string) => {
+  const downloadConfig = async (clientName: string) => {
+    if (selectedServerId === null) {
+      showMessage('No server selected.', true);
+      return;
+    }
     try {
-      const response = await apiClient.getClientConfig(name);
+      const response = await apiClient.getClientConfig(selectedServerId, clientName);
       if (response.success && response.data) {
         const blob = new Blob([response.data.config], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${name}.conf`;
+        a.download = `${clientName}.conf`;
         a.click();
         URL.revokeObjectURL(url);
       }
@@ -356,28 +423,36 @@ function App() {
       showMessage(err instanceof Error ? err.message : 'Download failed', true);
     }
   };
-  const shortLink = async (name: string,public_key:string) => {
+
+  const shortLink = async (name: string, public_key: string) => {
     try {
-      window.location.href = `${API_BASE_URL}/shortlink/${name}/${public_key}`
+      // The shortlink doesn't contain server_id directly, it relies on the backend's
+      // _get_client_by_name_and_public_key to search across servers.
+      window.open(`${API_BASE_URL}/client-details/${name}/${public_key}`, '_blank');
     } catch (err) {
-      showMessage(err instanceof Error ? err.message : 'Download failed', true);
+      showMessage(err instanceof Error ? err.message : 'Failed to generate shortlink', true);
     }
   };
 
   const handleSync = async () => {
+    if (selectedServerId === null) {
+      showMessage('Please select a server to sync.', true);
+      return;
+    }
     setLoading(true);
     try {
-      // Apply staged settings first
+      // Apply staged settings first (these are central settings)
       for (const key in stagedSettings) {
         if (stagedSettings.hasOwnProperty(key) && settingsValues[key] !== stagedSettings[key]) {
           await apiClient.updateSetting(key, stagedSettings[key]);
         }
       }
       
-      const response = await apiClient.sync();
+      const response = await apiClient.sync(selectedServerId); // Sync on selected server
       if (response.success) {
         showMessage('Sync completed successfully!');
-        await loadData(); // Reload data to reflect all changes
+        await loadServerData(selectedServerId); // Reload selected server data
+        await loadServers(); // Reload server list to get updated statuses/caches
       } else {
         showMessage(response.message || 'Sync failed.', true);
       }
@@ -406,7 +481,7 @@ function App() {
         setNewApiTokenName('');
         setNewApiTokenValue('');
         setShowApiTokenForm(false);
-        await loadData();
+        await loadServerData(selectedServerId!); // Reload to update settings display
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Failed to add/update API token', true);
@@ -422,7 +497,7 @@ function App() {
       const response = await apiClient.deleteApiToken(name);
       if (response.success) {
         showMessage('API token deleted successfully!');
-        await loadData();
+        await loadServerData(selectedServerId!); // Reload to update settings display
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Failed to delete API token', true);
@@ -441,11 +516,14 @@ function App() {
 
   const handleEditInterfaceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingInterface) return;
+    if (!editingInterface || selectedServerId === null) {
+      showMessage('No interface or server selected.', true);
+      return;
+    }
 
     try {
       setLoading(true);
-      const response = await apiClient.updateInterface(`wg${editingInterface.wg}`, {
+      const response = await apiClient.updateInterface(selectedServerId, `wg${editingInterface.wg}`, {
         address: editInterfaceAddressRange,
         port: parseInt(editInterfacePort),
         status: editInterfaceStatus,
@@ -454,7 +532,7 @@ function App() {
         showMessage('Interface updated successfully!');
         setShowEditInterfaceForm(false);
         setEditingInterface(null);
-        await loadData();
+        await loadServerData(selectedServerId);
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Interface update failed', true);
@@ -464,16 +542,114 @@ function App() {
   };
 
   const handleDeleteInterface = async (wg_id: number) => {
-    if (!confirm(`Are you sure you want to delete WireGuard interface wg${wg_id} and all its associated clients? This action cannot be undone.`)) return;
+    if (!confirm(`Are you sure you want to delete WireGuard interface wg${wg_id} and all its associated clients from server ${selectedServerId}? This action cannot be undone.`)) return;
+    if (selectedServerId === null) {
+      showMessage('No server selected.', true);
+      return;
+    }
     try {
       setLoading(true);
-      const response = await apiClient.deleteInterface(wg_id);
+      const response = await apiClient.deleteInterface(selectedServerId, wg_id);
       if (response.success) {
         showMessage(`Interface wg${wg_id} deleted successfully!`);
-        await loadData();
+        await loadServerData(selectedServerId);
       }
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Failed to delete interface', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddServerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      const response = await apiClient.addServer({
+        name: newServerName,
+        ip_address: newServerIp,
+        agent_port: parseInt(newAgentPort),
+        api_key: newApiKey,
+        description: newServerDescription,
+      });
+      if (response.success) {
+        showMessage('Server added successfully!');
+        setShowAddServerForm(false);
+        setNewServerName('');
+        setNewServerIp('');
+        setNewAgentPort('3447');
+        setNewApiKey('');
+        setNewServerDescription('');
+        await loadServers(); // Reload server list
+        if (response.data && response.data.server_id && selectedServerId === null) {
+          setSelectedServerId(response.data.server_id); // Auto-select newly added if no other selected
+        }
+      }
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Failed to add server', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const editServer = (server: Server) => {
+    setEditingServer(server);
+    setEditServerName(server.name);
+    setEditServerIp(server.ip_address);
+    setEditAgentPort(server.agent_port.toString());
+    setEditApiKey(server.api_key || ''); // Pre-fill if exists (though usually not returned)
+    setEditServerDescription(server.description);
+    setEditServerStatus(server.status);
+    setShowEditServerForm(true);
+  };
+
+  const handleEditServerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingServer) return;
+
+    try {
+      setLoading(true);
+      const updateData: Partial<Server> = {
+        name: editServerName,
+        ip_address: editServerIp,
+        agent_port: parseInt(editAgentPort),
+        api_key: editApiKey,
+        description: editServerDescription,
+        status: editServerStatus,
+      };
+      const response = await apiClient.updateServer(editingServer.server_id, updateData);
+      if (response.success) {
+        showMessage('Server updated successfully!');
+        setShowEditServerForm(false);
+        setEditingServer(null);
+        await loadServers(); // Reload server list to reflect changes
+        if (selectedServerId === editingServer.server_id) {
+          await loadServerData(selectedServerId); // Reload data for the selected server if it was updated
+        }
+      }
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Failed to update server', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteServer = async (serverId: number, serverName: string) => {
+    if (!confirm(`Are you sure you want to delete server "${serverName}" (ID: ${serverId}) and all its associated clients and interfaces? This action cannot be undone.`)) return;
+
+    try {
+      setLoading(true);
+      const response = await apiClient.deleteServer(serverId);
+      if (response.success) {
+        showMessage('Server deleted successfully!');
+        await loadServers(); // Reload server list
+        if (selectedServerId === serverId) {
+          setSelectedServerId(null); // Deselect if the deleted server was active
+          setData(null); // Clear displayed data
+        }
+      }
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Failed to delete server', true);
     } finally {
       setLoading(false);
     }
@@ -483,9 +659,79 @@ function App() {
     apiClient.logout();
     setIsAuthenticated(false);
     setData(null);
-    setLoading(false); // Stop loading after logout
-    initialLoadRef.current = true; // Reset for next login
+    setAllServers([]);
+    setSelectedServerId(null);
+    setLoading(false);
+    initialLoadRef.current = true;
   };
+
+  const currentServer = useMemo(() => {
+    return allServers.find(server => server.server_id === selectedServerId);
+  }, [allServers, selectedServerId]);
+
+  // Aggregate dashboard stats from all servers for the overview dashboard tab
+  const aggregatedDashboardStats: DashboardStats | null = useMemo(() => {
+    if (!allServers || allServers.length === 0) return null;
+
+    let totalClients = 0;
+    let totalDownload = 0; // in KB/s
+    let totalUpload = 0;   // in KB/s
+    const overallStatus: string[] = [];
+    const overallAlerts: string[] = [];
+    let centralCpu = 'N/A';
+    let centralMem = { total: 'N/A', available: 'N/A', usage: 'N/A' };
+    let centralUptime = 'N/A';
+
+    allServers.forEach(server => {
+      if (server.dashboard_cache) {
+        totalClients += server.dashboard_cache.clients_count || 0;
+        try {
+          totalDownload += parseFloat(server.dashboard_cache.net.download.replace(' KB/s', '')) || 0;
+          totalUpload += parseFloat(server.dashboard_cache.net.upload.replace(' KB/s', '')) || 0;
+        } catch {} // Ignore parsing errors
+
+        overallStatus.push(server.dashboard_cache.status);
+        if (server.dashboard_cache.alert && server.dashboard_cache.alert.length > 0) {
+            overallAlerts.push(...server.dashboard_cache.alert);
+        }
+
+        // For central CPU/Mem/Uptime, just take from the first active server found, or keep N/A
+        if (server.status === 'active' && centralCpu === 'N/A') {
+          centralCpu = server.dashboard_cache.cpu;
+          centralMem = server.dashboard_cache.mem;
+          centralUptime = server.dashboard_cache.uptime;
+        }
+      }
+    });
+
+    // Determine overall status
+    let combinedStatus = 'Unknown';
+    if (allServers.some(s => s.status === 'unreachable')) {
+        combinedStatus = 'Partially Unreachable';
+    } else if (allServers.some(s => s.status === 'error')) {
+        combinedStatus = 'Partially Errored';
+    } else if (allServers.every(s => s.status === 'active')) {
+        combinedStatus = 'All Active';
+    } else if (allServers.length > 0) {
+        combinedStatus = 'Mixed Status';
+    }
+
+
+    return {
+      cpu: centralCpu,
+      mem: centralMem,
+      clients_count: totalClients,
+      status: combinedStatus,
+      alert: Array.from(new Set(overallAlerts)), // Unique alerts
+      bandwidth: data?.dashboard.bandwidth || '0', // This needs to be sum from all servers too, or central setting
+      uptime: centralUptime,
+      net: {
+        download: `${totalDownload.toFixed(2)} KB/s`,
+        upload: `${totalUpload.toFixed(2)} KB/s`,
+      },
+    };
+  }, [allServers, data]); // Depend on allServers and also data (for bandwidth if it's central)
+
 
   if (!isInstalled) {
     return (
@@ -681,27 +927,225 @@ function App() {
     );
   }
 
+  // Common UI for server selection / management
+  const renderServerManagement = () => (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <h2 className="text-xl font-bold text-white">Server Management</h2>
+        <button
+          onClick={() => setShowAddServerForm(true)}
+          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-all duration-200 transform hover:scale-105"
+        >
+          <Plus className="w-4 h-4" />
+          Add Server
+        </button>
+      </div>
+
+      {/* Add Server Form Modal */}
+      {showAddServerForm && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700 animate-scale-in">
+            <h3 className="text-lg font-semibold mb-4 text-white">Add New Server</h3>
+            <form onSubmit={handleAddServerSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Server Name</label>
+                <input type="text" value={newServerName} onChange={(e) => setNewServerName(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Server IP/Hostname</label>
+                <input type="text" value={newServerIp} onChange={(e) => setNewServerIp(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" placeholder="192.168.1.100" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Agent Port</label>
+                <input type="number" value={newAgentPort} onChange={(e) => setNewAgentPort(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" placeholder="3447" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Agent API Key</label>
+                <input type="text" value={newApiKey} onChange={(e) => setNewApiKey(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Description (Optional)</label>
+                <textarea value={newServerDescription} onChange={(e) => setNewServerDescription(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" rows={2} />
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" disabled={loading}
+                  className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all duration-200 transform hover:scale-105">
+                  {loading ? 'Adding...' : 'Add Server'}
+                </button>
+                <button type="button" onClick={() => setShowAddServerForm(false)}
+                  className="flex-1 bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Server Form Modal */}
+      {showEditServerForm && editingServer && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700 animate-scale-in">
+            <h3 className="text-lg font-semibold mb-4 text-white">Edit Server: {editingServer.name}</h3>
+            <form onSubmit={handleEditServerSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Server Name</label>
+                <input type="text" value={editServerName} onChange={(e) => setEditServerName(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Server IP/Hostname</label>
+                <input type="text" value={editServerIp} onChange={(e) => setEditServerIp(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Agent Port</label>
+                <input type="number" value={editAgentPort} onChange={(e) => setEditAgentPort(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Agent API Key</label>
+                <input type="text" value={editApiKey} onChange={(e) => setEditApiKey(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" />
+                <p className="text-xs text-gray-500 mt-1">Leave empty if not changing.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Description</label>
+                <textarea value={editServerDescription} onChange={(e) => setEditServerDescription(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" rows={2} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
+                <select
+                  value={editServerStatus}
+                  onChange={(e) => setEditServerStatus(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="unreachable">Unreachable</option>
+                  <option value="error">Error</option>
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" disabled={loading}
+                  className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all duration-200 transform hover:scale-105">
+                  {loading ? 'Updating...' : 'Update Server'}
+                </button>
+                <button type="button" onClick={() => setShowEditServerForm(false)}
+                  className="flex-1 bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700">
+        <div className="p-6 border-b border-gray-700">
+          <h3 className="font-semibold text-white">Managed Servers</h3>
+        </div>
+        <div className="p-6">
+          {allServers.length === 0 ? (
+            <div className="text-center py-8">
+              <ServerIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+              <p className="text-gray-400">No servers added yet</p>
+              <p className="text-sm text-gray-500 mt-1">Add your first server to get started</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-700/50 border-b border-gray-700">
+                  <tr>
+                    <th className="text-left p-4 font-medium text-gray-300">Name</th>
+                    <th className="text-left p-4 font-medium text-gray-300">IP:Port</th>
+                    <th className="text-left p-4 font-medium text-gray-300">Status</th>
+                    <th className="text-left p-4 font-medium text-gray-300">Last Synced</th>
+                    <th className="text-left p-4 font-medium text-gray-300">Description</th>
+                    <th className="text-left p-4 font-medium text-gray-300">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-700">
+                  {allServers.map((server) => (
+                    <tr key={server.server_id} className="hover:bg-gray-700/30 transition-colors duration-200">
+                      <td className="p-4">
+                        <p className="font-medium text-white">{server.name}</p>
+                        <p className="text-xs text-gray-500">ID: {server.server_id}</p>
+                      </td>
+                      <td className="p-4 text-sm text-gray-300">{server.ip_address}:{server.agent_port}</td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${server.status === 'active' ? 'bg-green-500 animate-pulse' : server.status === 'unreachable' ? 'bg-red-500' : 'bg-gray-500'}`} />
+                          <span className="text-sm text-gray-300 capitalize">{server.status}</span>
+                        </div>
+                      </td>
+                      <td className="p-4 text-sm text-gray-300">
+                        {server.last_synced ? new Date(server.last_synced).toLocaleString() : 'Never'}
+                      </td>
+                      <td className="p-4 text-sm text-gray-300">{server.description}</td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => editServer(server)}
+                            className="p-2 text-gray-400 hover:bg-gray-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
+                            title="Edit Server"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteServer(server.server_id, server.name)}
+                            className="p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
+                            title="Delete Server"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   const renderDashboard = () => {
-    if (!data) return (
+    // Determine which dashboard stats to show based on selectedServerId
+    let displayDashboard: DashboardStats | null = null;
+    if (activeTab === 'dashboard') { // The main aggregated dashboard
+        displayDashboard = aggregatedDashboardStats;
+    } else if (selectedServerId !== null && data) { // Dashboard for a specific selected server
+        displayDashboard = data.dashboard;
+    }
+
+    if (!displayDashboard) return (
       <div className="flex items-center justify-center py-12">
         <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
         <span className="ml-2 text-gray-400">Loading dashboard data...</span>
       </div>
     );
 
-    const { dashboard } = data;
 
     return (
       <div className="space-y-6 animate-fade-in">
         {/* Alerts */}
-        {dashboard.alert && dashboard.alert.length > 0 && (
+        {displayDashboard.alert && displayDashboard.alert.length > 0 && (
           <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-4 animate-slide-in">
             <div className="flex items-center gap-2 text-blue-300">
               <AlertCircle className="w-5 h-5" />
               <span className="font-medium">System Alert</span>
             </div>
             <ul className="mt-2 text-blue-200 text-sm">
-              {dashboard.alert.map((alert, index) => (
+              {displayDashboard.alert.map((alert, index) => (
                 <li key={index}>{alert}</li>
               ))}
             </ul>
@@ -717,7 +1161,7 @@ function App() {
               </div>
               <div>
                 <p className="text-sm text-gray-400">CPU Usage</p>
-                <p className="text-xl font-bold text-white">{dashboard.cpu}</p>
+                <p className="text-xl font-bold text-white">{displayDashboard.cpu}</p>
               </div>
             </div>
           </div>
@@ -729,8 +1173,8 @@ function App() {
               </div>
               <div>
                 <p className="text-sm text-gray-400">Memory</p>
-                <p className="text-xl font-bold text-white">{dashboard.mem.usage}</p>
-                <p className="text-xs text-gray-500">{dashboard.mem.available} available</p>
+                <p className="text-xl font-bold text-white">{displayDashboard.mem.usage}</p>
+                <p className="text-xs text-gray-500">{displayDashboard.mem.available} available</p>
               </div>
             </div>
           </div>
@@ -741,8 +1185,8 @@ function App() {
                 <Users className="w-5 h-5 text-purple-400" />
               </div>
               <div>
-                <p className="text-sm text-gray-400">Active Clients</p>
-                <p className="text-xl font-bold text-white">{dashboard.clients_count}</p>
+                <p className="text-sm text-gray-400">Total Clients</p>
+                <p className="text-xl font-bold text-white">{displayDashboard.clients_count}</p>
               </div>
             </div>
           </div>
@@ -754,7 +1198,7 @@ function App() {
               </div>
               <div>
                 <p className="text-sm text-gray-400">Uptime</p>
-                <p className="text-xl font-bold text-white">{formatUptime(parseInt(dashboard.uptime))}</p>
+                <p className="text-xl font-bold text-white">{formatUptime(parseInt(displayDashboard.uptime))}</p>
               </div>
             </div>
           </div>
@@ -772,11 +1216,11 @@ function App() {
             <div className="space-y-2">
               <div className="flex justify-between">
                 <span className="text-sm text-gray-400">Download:</span>
-                <span className="text-sm font-medium text-white">{dashboard.net.download}</span>
+                <span className="text-sm font-medium text-white">{displayDashboard.net.download}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-400">Upload:</span>
-                <span className="text-sm font-medium text-white">{dashboard.net.upload}</span>
+                <span className="text-sm font-medium text-white">{displayDashboard.net.upload}</span>
               </div>
             </div>
           </div>
@@ -788,61 +1232,71 @@ function App() {
               </div>
               <h3 className="font-semibold text-white">Total Bandwidth</h3>
             </div>
-            <p className="text-2xl font-bold text-white">{formatBytes(parseInt(dashboard.bandwidth))}</p>
+            <p className="text-2xl font-bold text-white">{formatBytes(parseInt(displayDashboard.bandwidth))}</p>
           </div>
         </div>
 
-        {/* Recent Clients */}
-        <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700">
-          <div className="p-6 border-b border-gray-700">
-            <h3 className="font-semibold text-white">Recent Clients</h3>
-          </div>
-          <div className="p-6">
-            {data.clients.length === 0 ? (
-              <div className="text-center py-8">
-                <Users className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-400">No clients configured</p>
-                <p className="text-sm text-gray-500 mt-1">Add your first client to get started</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {data.clients.slice(0, 5).map((client) => (
-                  <div key={client.name} className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg hover:bg-gray-700 transition-all duration-200">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-3 h-3 rounded-full ${client.status ? 'bg-green-500' : 'bg-gray-500'} animate-pulse`} />
-                      <div>
-                        <p className="font-medium text-white">{client.name}</p>
-                        <p className="text-sm text-gray-400">{client.address}</p>
-                      </div>
+        {/* Recent Clients (for selected server only) */}
+        {selectedServerId !== null && data && (
+            <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700">
+                <div className="p-6 border-b border-gray-700">
+                    <h3 className="font-semibold text-white">Recent Clients on {currentServer?.name || "Selected Server"}</h3>
+                </div>
+                <div className="p-6">
+                    {data.clients.length === 0 ? (
+                    <div className="text-center py-8">
+                        <Users className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                        <p className="text-gray-400">No clients configured for this server</p>
+                        <p className="text-sm text-gray-500 mt-1">Add clients to {currentServer?.name || "this server"}</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-medium text-white">
-                        {formatBytes(client.used_trafic.download + client.used_trafic.upload)}
-                      </p>
-                      <p className="text-xs text-gray-500">used</p>
+                    ) : (
+                    <div className="space-y-3">
+                        {data.clients.slice(0, 5).map((client) => (
+                        <div key={client.name} className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg hover:bg-gray-700 transition-all duration-200">
+                            <div className="flex items-center gap-3">
+                            <div className={`w-3 h-3 rounded-full ${client.status ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
+                            <div>
+                                <p className="font-medium text-white">{client.name}</p>
+                                <p className="text-sm text-gray-400">{client.address}</p>
+                            </div>
+                            </div>
+                            <div className="text-right">
+                            <p className="text-sm font-medium text-white">
+                                {formatBytes(client.used_trafic.download + client.used_trafic.upload)}
+                            </p>
+                            <p className="text-xs text-gray-500">used</p>
+                            </div>
+                        </div>
+                        ))}
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+                    )}
+                </div>
+            </div>
+        )}
       </div>
     );
   };
 
   const renderClients = () => {
+    if (selectedServerId === null) {
+      return (
+        <div className="flex items-center justify-center py-12 text-gray-400">
+          <AlertCircle className="w-5 h-5 mr-2" />
+          Please add and select a server to manage clients.
+        </div>
+      );
+    }
     if (!data) return (
       <div className="flex items-center justify-center py-12">
         <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
-        <span className="ml-2 text-gray-400">Loading client data...</span>
+        <span className="ml-2 text-gray-400">Loading client data for {currentServer?.name || "selected server"}...</span>
       </div>
     );
 
     return (
       <div className="space-y-6 animate-fade-in">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <h2 className="text-xl font-bold text-white">Client Management</h2>
+          <h2 className="text-xl font-bold text-white">Clients on {currentServer?.name}</h2>
           <button
             onClick={() => setShowClientForm(true)}
             className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-all duration-200 transform hover:scale-105"
@@ -1049,27 +1503,39 @@ function App() {
   };
 
   const renderSettings = () => {
+    if (selectedServerId === null) {
+      return (
+        <div className="flex items-center justify-center py-12 text-gray-400">
+          <AlertCircle className="w-5 h-5 mr-2" />
+          Please add and select a server to manage its settings or interfaces.
+        </div>
+      );
+    }
     if (!data) return (
       <div className="flex items-center justify-center py-12">
         <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
-        <span className="ml-2 text-gray-400">Loading settings data...</span>
+        <span className="ml-2 text-gray-400">Loading settings data for {currentServer?.name || "selected server"}...</span>
       </div>
     );
 
     const commonSettings = [
-      { key: 'server_ip', label: 'Server IP', type: 'text' },
-      { key: 'custom_endpont', label: 'Custom Endpoint', type: 'text' },
-      { key: 'dns', label: 'DNS Server', type: 'text' },
-      { key: 'mtu', label: 'MTU', type: 'number' },
-      { key: 'reset_time', label: 'Reset Time (hours)', type: 'number' },
-      { key: 'ap_port', label: 'API + Panel Port', type: 'number' },
-      { key: 'auto_backup', label: 'Auto Backup', type: 'select', options: [{ value: '1', label: 'Enabled' }, { value: '0', label: 'Disabled' }] },
+      { key: 'server_ip', label: 'Server IP (Central)', type: 'text' }, // This should probably be the central panel's IP, not server specific
+      { key: 'custom_endpont', label: 'Custom Endpoint (Central)', type: 'text' }, // Same as above
+      { key: 'dns', label: 'DNS Server (Global for Clients)', type: 'text' },
+      { key: 'mtu', label: 'MTU (Global for Clients)', type: 'number' },
+      { key: 'reset_time', label: 'Reset Time (hours, Agent)', type: 'number' }, // This affects agents
+      { key: 'ap_port', label: 'API + Panel Port (Central)', type: 'number' },
+      { key: 'auto_backup', label: 'Auto Backup (Agent)', type: 'select', options: [{ value: '1', label: 'Enabled' }, { value: '0', label: 'Disabled' }] },
     ];
+    // Note: 'reset_time' and 'auto_backup' are currently settings stored centrally but influence agent behavior.
+    // In a multi-server setup, these might become per-server settings, or the central panel needs to send
+    // a command to each agent to update its local settings. For simplicity now, they are central settings.
+
 
     return (
       <div className="space-y-6 animate-fade-in">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <h2 className="text-xl font-bold text-white">Settings</h2>
+          <h2 className="text-xl font-bold text-white">Settings for {currentServer?.name}</h2>
           <div className="flex gap-2">
             <button
               onClick={() => setShowInterfaceForm(true)}
@@ -1093,7 +1559,7 @@ function App() {
         {showInterfaceForm && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
             <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700 animate-scale-in">
-              <h3 className="text-lg font-semibold mb-4 text-white">Add New Interface</h3>
+              <h3 className="text-lg font-semibold mb-4 text-white">Add New Interface on {currentServer?.name}</h3>
               <form onSubmit={handleInterfaceSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">Address Range</label>
@@ -1142,7 +1608,7 @@ function App() {
         {showEditInterfaceForm && editingInterface && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
             <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700 animate-scale-in">
-              <h3 className="text-lg font-semibold mb-4 text-white">Edit Interface wg{editingInterface.wg}</h3>
+              <h3 className="text-lg font-semibold mb-4 text-white">Edit Interface wg{editingInterface.wg} on {currentServer?.name}</h3>
               <form onSubmit={handleEditInterfaceSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">Address Range</label>
@@ -1204,42 +1670,42 @@ function App() {
           </div>
         )}
 
-        {/* Common Settings */}
+        {/* Common Settings (central settings) */}
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">
-  <h3 className="font-semibold text-white mb-4">General Settings</h3>
-  <div className="flex -mx-3 gap-y-6">
-    {commonSettings.map((setting) => (
-      <div key={setting.key} className="w-full md:w-1/2 px-3">
-        <label className="block text-sm font-medium text-gray-300 mb-2">
-          {setting.label}
-        </label>
-        {setting.type === 'select' ? (
-          <select
-            value={stagedSettings[setting.key] || ''}
-            onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
-          >
-            {setting.options?.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
+          <h3 className="font-semibold text-white mb-4">General Settings (Central Panel)</h3>
+          <div className="flex flex-wrap -mx-3 gap-y-6">
+            {commonSettings.map((setting) => (
+              <div key={setting.key} className="w-full md:w-1/2 px-3">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  {setting.label}
+                </label>
+                {setting.type === 'select' ? (
+                  <select
+                    value={stagedSettings[setting.key] || ''}
+                    onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                  >
+                    {setting.options?.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={setting.type}
+                    value={stagedSettings[setting.key] || ''}
+                    onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                  />
+                )}
+              </div>
             ))}
-          </select>
-        ) : (
-          <input
-            type={setting.type}
-            value={stagedSettings[setting.key] || ''}
-            onChange={(e) => updateStagedSetting(setting.key, e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
-          />
-        )}
-      </div>
-    ))}
-  </div>
-</div>
+          </div>
+        </div>
 
 
-        {/* Telegram Bot Settings */}
+        {/* Telegram Bot Settings (central settings) */}
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">
           <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
             <Bot className="w-5 h-5 text-purple-400" /> Telegram Bot Settings
@@ -1326,7 +1792,7 @@ function App() {
           </div>
         </div>
 
-        {/* API Tokens Management */}
+        {/* API Tokens Management (central settings) */}
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 p-6">
           <h3 className="font-semibold text-white mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1419,16 +1885,16 @@ function App() {
           )}
         </div>
 
-        {/* Interfaces */}
+        {/* Interfaces (for selected server) */}
         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700">
           <div className="p-6 border-b border-gray-700">
-            <h3 className="font-semibold text-white">WireGuard Interfaces</h3>
+            <h3 className="font-semibold text-white">WireGuard Interfaces on {currentServer?.name}</h3>
           </div>
           <div className="p-6">
             {data.interfaces.length === 0 ? (
               <div className="text-center py-8">
-                <Server className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-400">No interfaces configured</p>
+                <ServerIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                <p className="text-gray-400">No interfaces configured for this server</p>
                 <p className="text-sm text-gray-500 mt-1">Add your first interface to get started</p>
               </div>
             ) : (
@@ -1485,13 +1951,32 @@ function App() {
               <h1 className="text-xl font-bold text-white">Candy Panel</h1>
             </div>
             {isAuthenticated && (
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">Logout</span>
-              </button>
+              <div className="flex items-center gap-4">
+                {/* Server Selector */}
+                {allServers.length > 0 && (
+                  <div className="relative">
+                    <select
+                      value={selectedServerId || ''}
+                      onChange={(e) => setSelectedServerId(parseInt(e.target.value))}
+                      className="bg-gray-700 text-white py-2 px-3 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 pr-8"
+                    >
+                      {allServers.map((server) => (
+                        <option key={server.server_id} value={server.server_id}>
+                          {server.name} ({server.status})
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  </div>
+                )}
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden sm:inline">Logout</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1504,9 +1989,15 @@ function App() {
             <div className="flex space-x-4 py-4 overflow-x-auto">
               <TabButton
                 icon={<Activity className="w-4 h-4" />}
-                label="Dashboard"
+                label="Overview"
                 isActive={activeTab === 'dashboard'}
                 onClick={() => setActiveTab('dashboard')}
+              />
+              <TabButton
+                icon={<ServerIcon className="w-4 h-4" />}
+                label="Servers"
+                isActive={activeTab === 'servers'}
+                onClick={() => setActiveTab('servers')}
               />
               <TabButton
                 icon={<Users className="w-4 h-4" />}
@@ -1527,14 +2018,31 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {isAuthenticated && loading && !data && ( // Show loading only if authenticated and no data loaded yet
+        {isAuthenticated && loading && !data && allServers.length === 0 && ( // Initial load for servers
           <div className="flex items-center justify-center py-12">
             <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
-            <span className="ml-2 text-gray-400">Loading data...</span>
+            <span className="ml-2 text-gray-400">Loading servers...</span>
           </div>
         )}
+        {isAuthenticated && !loading && allServers.length === 0 && activeTab !== 'servers' && (
+          <div className="flex items-center justify-center py-12 text-gray-400 flex-col">
+            <AlertCircle className="w-12 h-12 mb-4 text-blue-400" />
+            <p className="text-xl font-semibold mb-2">No Servers Configured</p>
+            <p className="text-md">Please go to the "Servers" tab to add your first WireGuard server.</p>
+          </div>
+        )}
+        {isAuthenticated && selectedServerId === null && allServers.length > 0 && activeTab !== 'servers' && (
+             <div className="flex items-center justify-center py-12 text-gray-400 flex-col">
+                <AlertCircle className="w-12 h-12 mb-4 text-blue-400" />
+                <p className="text-xl font-semibold mb-2">Select a Server</p>
+                <p className="text-md">Please select a server from the dropdown in the header to view its details.</p>
+            </div>
+        )}
 
-        {isAuthenticated && activeTab === 'dashboard' && renderDashboard()}
+
+        {isAuthenticated && activeTab === 'dashboard' && selectedServerId !== null && renderDashboard()}
+        {isAuthenticated && activeTab === 'dashboard' && selectedServerId === null && allServers.length > 0 && renderDashboard()} {/* Show aggregated dashboard if no server selected but servers exist */}
+        {isAuthenticated && activeTab === 'servers' && renderServerManagement()}
         {isAuthenticated && activeTab === 'clients' && renderClients()}
         {isAuthenticated && activeTab === 'settings' && renderSettings()}
       </main>

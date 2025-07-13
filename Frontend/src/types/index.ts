@@ -7,7 +7,7 @@ export interface Client {
   created_at: string;
   expires: string;
   note: string;
-  traffic: string;
+  traffic: string; // Traffic limit in bytes (as string)
   used_trafic: {
     download: number;
     upload: number;
@@ -19,6 +19,7 @@ export interface Client {
   server_endpoint_ip: string;
   server_dns: string;
   server_mtu: string;
+  server_id?: number; // New: Link to the server it belongs to
 }
 
 export interface Interface {
@@ -28,6 +29,7 @@ export interface Interface {
   port: number;
   address_range: string;
   status: boolean;
+  server_id?: number; // New: Link to the server it belongs to
 }
 
 export interface DashboardStats {
@@ -40,13 +42,26 @@ export interface DashboardStats {
   clients_count: number;
   status: string;
   alert: string[];
-  bandwidth: string;
+  bandwidth: string; // Total bandwidth used (as string representation of bytes)
   uptime: string;
   net: {
     download: string;
     upload: string;
   };
 }
+
+export interface Server {
+  server_id: number;
+  name: string;
+  ip_address: string;
+  agent_port: number;
+  api_key?: string; // Optional for security, might not be returned after creation
+  status: string; // e.g., 'active', 'inactive', 'unreachable', 'error'
+  last_synced: string | null;
+  description: string;
+  dashboard_cache?: DashboardStats; // New: Cached dashboard stats from the server
+}
+
 export interface ApiResponse<T = any> {
   message: string;
   success: boolean;
@@ -58,14 +73,6 @@ export interface AuthData {
   token_type: string;
 }
 
-// New interfaces for Telegram and API Tokens
-export interface TelegramSettings {
-  telegram_bot_status: string;
-  telegram_bot_admin_id: string;
-  telegram_bot_token: string;
-  telegram_bot_prices: string; // Stored as JSON string
-}
-
 export interface ApiTokens {
   [key: string]: string; // A dictionary where key is token name, value is the token string
 }
@@ -75,6 +82,4 @@ export interface AllData {
   clients: Client[];
   interfaces: Interface[];
   settings: Record<string, string>;
-  // Add new fields for Telegram settings and API tokens if they are returned directly by getAllData
-  // For now, these are part of 'settings' record, but if backend changes, they can be separate.
 }
