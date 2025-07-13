@@ -1812,5 +1812,19 @@ PersistentKeepalive = 25
             if not stored_ap_port or stored_ap_port['value'] != actual_ap_port:
                 self.db.update('settings', {'value': actual_ap_port}, {'key': 'ap_port'})
                 print(f"[*] Updated ap_port in settings to reflect environment variable: {actual_ap_port}")
-
+            print("[*] Fetching and caching local dashboard stats for self-registered server...")
+            try:
+                local_dashboard_stats = await self._dashboard_stats() # Get local stats
+                # Assuming the central panel itself is server_id = 1
+                self.db.update('servers',
+                               {'status': 'active', # Ensure local server is marked active
+                                'last_synced': datetime.now().isoformat(),
+                                'dashboard_cache': json.dumps(local_dashboard_stats)},
+                               {'server_id': 1}) # Update the entry for the central server
+                print("[*] Local dashboard stats cached for server ID 1.")
+            except Exception as e:
+                print(f"Warning: Failed to fetch and cache local dashboard stats for server ID 1: {e}")
+                # Mark as error/unreachable if local dashboard fetch fails
+                self.db.update('servers', {'status': 'error'}, {'server_id': 1})
+            # --- END NEW ---
             print("[*] Local synchronization process completed.")
