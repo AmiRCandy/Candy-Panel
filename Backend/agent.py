@@ -78,25 +78,17 @@ async def agent_create_client():
             # Need to return public_key, private_key, address for central panel to store
             client_details = await asyncio.to_thread(agent_candy_panel.db.get, 'clients', {'name': name})
             if client_details:
-               #return success_response("Client created locally.", data={
-               #    "client_config": config_or_message,
-               #    "public_key": client_details['public_key'],
-               #    "private_key": client_details['private_key'],
-               #    "address": client_details['address']
-               #})
-               return {
-                  "client_config": config_or_message,
-                   "public_key": client_details['public_key'],
-                   "private_key": client_details['private_key'],
-                   "address": client_details['address']
-               }
+                return success_response("Client created locally.", data={
+                    "client_config": config_or_message,
+                    "public_key": client_details['public_key'],
+                    "private_key": client_details['private_key'],
+                    "address": client_details['address']
+                })
             else:
                 return error_response("Client created but details not found in local DB.", 500)
         return error_response(config_or_message, 400)
     except CommandExecutionError as e:
         return error_response(f"Agent failed to create client (command error): {e}", 500)
-    except Exception as e:
-        return error_response(f"Agent failed to create client: {e}", 500)
 
 @app.post("/agent_api/client/update")
 @authenticate_agent
@@ -306,4 +298,4 @@ async def agent_get_client_details():
 
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=1212)
+    app.run(host="0.0.0.0", port=1212,debug=True)
