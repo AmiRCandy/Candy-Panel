@@ -410,11 +410,11 @@ AllowedIPs = {client_ip}/32
 
     # Modified: _install_candy_panel to self-register central server as agent
     def _install_candy_panel(self, server_ip: str,
-                             wg_port: str,
-                             wg_address_range: str = "10.0.0.1/24",
-                             wg_dns: str = "8.8.8.8",
-                             admin_user: str = 'admin',
-                             admin_password: str = 'admin') -> tuple[bool, str]:
+                         wg_port: str,
+                         wg_address_range: str = "10.0.0.1/24",
+                         wg_dns: str = "8.8.8.8",
+                         admin_user: str = 'admin',
+                         admin_password: str = 'admin') -> tuple[bool, str]:
         """
         Installs WireGuard and initializes the CandyPanel server configuration.
         This runs on the central panel machine during its initial setup.
@@ -470,7 +470,7 @@ AllowedIPs = {client_ip}/32
         print("[+] Creating /etc/wireguard if not exists...")
         os.makedirs("/etc/wireguard", exist_ok=True)
         os.chmod("/etc/wireguard", 0o700)
-        
+
         wg_id = 0 # Default initial interface ID
         default_interface = self._get_default_interface()
         interface_name = f"wg{wg_id}"
@@ -494,15 +494,15 @@ AllowedIPs = {client_ip}/32
                 public_key = f.read().strip()
 
         wg_conf = f"""
-[Interface]
-Address = {wg_address_range}
-ListenPort = {wg_port}
-PrivateKey = {private_key}
-MTU = 1420
-DNS = 8.8.8.8
+    [Interface]
+    Address = {wg_address_range}
+    ListenPort = {wg_port}
+    PrivateKey = {private_key}
+    MTU = 1420
+    DNS = 8.8.8.8
 
-PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
-PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
+    PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
+    PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
         """.strip()
 
         with open(wg_conf_path, "w") as f:
@@ -516,7 +516,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         admin_data = json.dumps({'user': admin_user, 'password': admin_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
-        
+
         # Cron job for central panel's sync (already there)
         current_dir = os.path.abspath(os.path.dirname(__file__))
         cron_script_path = os.path.join(current_dir, 'cron.py')
@@ -528,15 +528,11 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         print("[+] Self-registering central panel as the first managed server...")
         central_agent_ip = "127.0.0.1" # Agent runs locally
         central_agent_port = int(os.environ.get('AGENT_PORT', '3447')) # Assuming agent listens on 3447
-        
+
         # Generate a unique API key for the central server's agent.
         # This key should be stored securely and passed to the agent's environment.
         central_agent_api_key = os.environ.get('AGENT_API_KEY_CENTRAL', str(uuid.uuid4())) # Use env var or generate
-        
-        # Insert initial interface into central DB, linked to its self-registered server_id
-        # This is crucial: the *central* DB now records the interface as belonging to itself.
-        # We need the server_id *before* adding the interface.
-        
+
         # First, add the central server as a managed server
         success_add_server, msg_add_server, new_server_id =  self.add_server(
             name="Central Panel Server",
@@ -547,10 +543,8 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         )
         if not success_add_server:
             return False, f"Failed to self-register central server: {msg_add_server}"
-        
+
         # Now, insert the initial wg0 interface and link it to this new server_id
-        # Note: This is inserting into the CENTRAL panel's DB.
-        # The agent's local DB will have its own interfaces.
         if not self.db.has('interfaces', {'wg': wg_id, 'server_id': new_server_id}):
             self.db.insert('interfaces', {
                 'wg': wg_id,
@@ -561,9 +555,9 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                 'address_range': wg_address_range,
                 'status': True
             })
-        
+
         print(f"[+] Central panel self-registered as Server ID: {new_server_id}. Initial interface wg{wg_id} linked.")
-        
+
         # Ensure the central panel's WireGuard interface starts
         try:
             self.run_command(f"sudo systemctl enable wg-quick@wg{wg_id}")
