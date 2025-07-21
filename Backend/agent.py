@@ -34,7 +34,7 @@ def authenticate_agent(f):
 
 # Helper for common responses (similar to main.py)
 def success_response(message: str, data=None, status_code: int = 200):
-    return jsonify({"message": message, "success": True, "data": data}), status_code
+    return jsonify({"message": message, "success": True, "data": json.dumps(data)}), status_code
 
 def error_response(message: str, status_code: int = 400):
     return jsonify({"message": message, "success": False}), status_code
@@ -79,6 +79,7 @@ async def agent_create_client():
             client_details = await asyncio.to_thread(agent_candy_panel.db.get, 'clients', {'name': name})
             if client_details:
                 return success_response("Client created locally.", data={
+                    "client_config": config_or_message,
                     "public_key": client_details['public_key'],
                     "private_key": client_details['private_key'],
                     "address": client_details['address']
