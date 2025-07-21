@@ -80,8 +80,7 @@ class SQLite:
                     `used_trafic` TEXT NOT NULL DEFAULT '{"download":0,"upload":0, "last_wg_rx":0, "last_wg_tx":0}',
                     `connected_now` BOOLEAN NOT NULL DEFAULT 0,
                     `status` BOOLEAN NOT NULL DEFAULT 1,
-                    PRIMARY KEY (`name`, `server_id`),
-                    UNIQUE(`server_id`, `address`), 
+                    PRIMARY KEY (`name`),
                     FOREIGN KEY (`server_id`) REFERENCES `servers`(`server_id`) ON DELETE CASCADE,
                     FOREIGN KEY (`server_id`, `wg`) REFERENCES `interfaces`(`server_id`, `wg`) 
                 );
