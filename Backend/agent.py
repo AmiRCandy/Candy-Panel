@@ -76,7 +76,7 @@ async def agent_create_client():
         success, config_or_message = await asyncio.to_thread(agent_candy_panel._new_client, name, expires, traffic, wg_id, note)
         if success:
             # Need to return public_key, private_key, address for central panel to store
-            client_details = await asyncio.to_thread(agent_candy_panel.db.get, 'clients', {'name': name.replace(win)})
+            client_details = await asyncio.to_thread(agent_candy_panel.db.get, 'clients', {'name': name})
             if client_details:
                 return success_response("Client created locally.", data={
                     "client_config": config_or_message,
