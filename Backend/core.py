@@ -680,7 +680,7 @@ AllowedIPs = {client_ip}/32
                         'connected_now': False,
                         'status': True
                     })
-                    return True, json.loads(response['data'])['client_config'] # Return client config from agent
+                    return True, response['data']['client_config'] # Return client config from agent
                 return False, response.get('message', 'Unknown error from agent.')
             except Exception as e:
                 return False, f"Failed to create client on remote server: {e}"

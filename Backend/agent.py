@@ -34,7 +34,7 @@ def authenticate_agent(f):
 
 # Helper for common responses (similar to main.py)
 def success_response(message: str, data=None, status_code: int = 200):
-    return jsonify({"message": message, "success": True, "data": json.dumps(data)}), status_code
+    return jsonify({"message": message, "success": True, "data": data}), status_code
 
 def error_response(message: str, status_code: int = 400):
     return jsonify({"message": message, "success": False}), status_code
