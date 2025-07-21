@@ -79,7 +79,6 @@ async def agent_create_client():
             client_details = await asyncio.to_thread(agent_candy_panel.db.get, 'clients', {'name': name})
             if client_details:
                 return success_response("Client created locally.", data={
-                    "client_config": config_or_message, # This is the actual client config string
                     "public_key": client_details['public_key'],
                     "private_key": client_details['private_key'],
                     "address": client_details['address']
