@@ -23,11 +23,11 @@ class RemoteAgentClient:
         self.base_url = f"http://{ip_address}:{agent_port}/agent_api"
         self.api_key = api_key
 
-    async def post(self, endpoint: str, data: dict = None):
+    def post(self, endpoint: str, data: dict = None):
         headers = {"X-API-Key": self.api_key, "Content-Type": "application/json"}
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(f"{self.base_url}{endpoint}", json=data, headers=headers, timeout=30)
+            with httpx.Client() as client:
+                response =  client.post(f"{self.base_url}{endpoint}", json=data, headers=headers, timeout=30)
                 response.raise_for_status() # Raise an exception for 4xx/5xx responses
                 return response.json()
         except httpx.HTTPStatusError as e:
@@ -41,18 +41,21 @@ class RemoteAgentClient:
             raise Exception(f"Agent unexpected error to {endpoint}: {e}")
 
 
-class CentralPanelManager:
+class CandyPanel:
     # Modified: db_path parameter added to allow agent to use a different DB file
     def __init__(self, db_path='CandyPanel.db'):
         """
-        Initializes the CentralPanelManager with a SQLite database connection.
-        This central panel instance will manage 'servers',
+        Initializes the CandyPanel with a SQLite database connection.
+        In multi-server mode, this central panel instance will manage 'servers',
         'clients', 'interfaces' (with server_id), and 'settings' locally.
         It communicates with remote agents for actual WireGuard operations.
         """
         self.db = SQLite(db_path=db_path) # Pass db_path to SQLite constructor
         self.agent_clients: Dict[int, RemoteAgentClient] = {} # Store agent clients by server_id
-        self._load_agent_clients()
+        # For the central panel, load agent clients on init.
+        # For an agent, this map will remain empty as it only acts locally.
+        if db_path == 'CandyPanel.db': # Only central panel manages remote agents
+            self._load_agent_clients()
 
     def _load_agent_clients(self):
         """
@@ -81,7 +84,7 @@ class CentralPanelManager:
         # Test connection to the agent
         test_agent = RemoteAgentClient(ip_address, agent_port, api_key)
         try:
-            test_response = test_agent.post("/dashboard")
+            test_response =  test_agent.post("/dashboard")
             if not test_response.get('success'):
                 return False, f"Could not connect to agent or agent returned error: {test_response.get('message', 'Unknown error')}", None
         except Exception as e:
@@ -139,7 +142,479 @@ class CentralPanelManager:
         """Retrieves a single server by its ID."""
         return self.db.get('servers', {'server_id': server_id})
 
-    async def _dashboard_stats_for_server(self, server_id: int) -> dict:
+    @staticmethod
+    def _is_valid_ip(ip: str) -> bool:
+        """
+        Checks if a given string is a valid IP address.
+        """
+        try:
+            ipaddress.ip_address(ip)
+            return True
+        except ValueError:
+            return False
+
+    # This method is primarily for agent's local operation now.
+    # The central panel will get traffic via agent.
+    def run_command(self, cmd: str, check: bool = True) -> str | None:
+        """
+        Executes a shell command and returns its stdout.
+        Raises an exception if the command fails and 'check' is True.
+        This method is now primarily used by the agent on its local machine.
+        The central panel will not use this for remote operations.
+        """
+        try:
+            result = subprocess.run(cmd, shell=True, check=check, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Error running command '{cmd}': {result.stderr.strip()}")
+                raise Exception(f"Command failed: {result.stderr.strip()}")
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            print(f"Error running '{cmd}': {e.stderr.strip()}")
+            if check:
+                raise CommandExecutionError(f"Command '{cmd}' failed: {e.stderr.strip()}")
+            return None
+        except Exception as e:
+            print(f"An unexpected error occurred while running '{cmd}': {e}")
+            if check:
+                raise CommandExecutionError(f"Unexpected error: {e}")
+            return None
+    def _get_default_interface(self):
+        """Gets the default network interface."""
+        try:
+            gateways = netifaces.gateways()
+            return gateways['default'][netifaces.AF_INET][1]
+        except Exception:
+            result = self.run_command("ip route | grep default | awk '{print $5}'", check=False)
+            if result:
+                return result
+            return "eth0"
+    @staticmethod
+    def load_traffic_db() -> dict:
+        """
+        Loads the total traffic data from the JSON file.
+        (This old method is largely superseded by DB storage, but kept for compatibility if needed locally by agent.)
+        """
+        if os.path.exists(DB_FILE):
+            try:
+                with open(DB_FILE, 'r') as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                print(f"Error: Could not decode JSON from {DB_FILE}. Returning empty dict.")
+                return {}
+        return {}
+
+    @staticmethod
+    def save_traffic_db(data: dict):
+        """
+        Saves the total traffic data to the JSON file.
+        (This old method is largely superseded by DB storage, but kept for compatibility if needed locally by agent.)
+        """
+        with open(DB_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+
+    def _get_interface_path(self, name: str) -> str:
+        """
+        Constructs the full path for a WireGuard interface configuration file.
+        Used by the agent locally.
+        """
+        return os.path.join(WG_DIR, f"{name}.conf")
+
+    def _interface_exists(self, name: str) -> bool:
+        """
+        Checks if a WireGuard interface configuration file exists.
+        Used by the agent locally.
+        """
+        return os.path.exists(self._get_interface_path(name))
+
+    def _get_all_ips_in_subnet(self, subnet_cidr: str) -> list[str]:
+        """
+        Returns all host IPs within a given subnet CIDR.
+        Used by the agent locally.
+        """
+        network = ipaddress.ip_network(subnet_cidr, strict=False)
+        return [str(ip) for ip in network.hosts()]
+
+    def _get_server_public_key(self, wg_id: int) -> str:
+        """
+        Retrieves the server's public key for a specific WireGuard interface.
+        Used by the agent locally.
+        """
+        try:
+            with open(SERVER_PUBLIC_KEY_PATH.replace('X', str(wg_id))) as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            print(f"Error: Server public key file not found for wg{wg_id}.")
+            raise
+
+    def _generate_keypair(self) -> tuple[str, str]:
+        """
+        Generates a new WireGuard private and public key pair.
+        Used by the agent locally.
+        """
+        priv = self.run_command("wg genkey")
+        pub = self.run_command(f"echo {priv} | wg pubkey")
+        return priv, pub
+
+    def _get_used_ips(self, wg_id: int) -> set[int]:
+        """
+        Parses the WireGuard configuration file to find used client IPs.
+        Assumes IPs are in the format 10.0.0.X/32.
+        Used by the agent locally.
+        """
+        try:
+            # When run on agent, it will access its local config file
+            with open(WG_CONF_PATH.replace('X', str(wg_id)), "r") as f:
+                content = f.read()
+            # Regex to find IPs in "AllowedIPs = 10.0.0.X/32" format
+            ips = re.findall(r"AllowedIPs\s*=\s*\d+\.\d+\.\d+\.(\d+)/32", content)
+            return set(int(ip) for ip in ips)
+        except FileNotFoundError:
+            print(f"Error: WireGuard config file not found for wg{wg_id}.")
+            return set() # Return empty set if config file doesn't exist
+
+    def _backup_config(self, wg_id: int):
+        """
+        Creates a backup of the WireGuard configuration file.
+        Used by the agent locally.
+        """
+        config_path = WG_CONF_PATH.replace('X', str(wg_id))
+        backup_path = f"{config_path}.bak"
+        try:
+            shutil.copy(config_path, backup_path)
+            print(f"[+] Backup created: {backup_path}")
+        except FileNotFoundError:
+            print(f"[!] Warning: Config file {config_path} not found for backup.")
+        except Exception as e:
+            print(f"[!] Error creating backup for wg{wg_id}: {e}")
+
+    def _reload_wireguard(self, wg_id: int):
+        """
+        Reloads a specific WireGuard interface.
+        Used by the agent locally.
+        """
+        print(f"[*] Reloading WireGuard interface wg{wg_id}...")
+        self.run_command(f"sudo wg-quick down wg{wg_id} || true", check=False)
+        self.run_command(f"sudo wg-quick up wg{wg_id}")
+        print(f"[*] WireGuard interface wg{wg_id} reloaded.")
+
+    def _add_peer_to_config(self, wg_id: int, client_name: str, client_public_key: str, client_ip: str):
+        """
+        Adds a client peer entry to the WireGuard configuration file.
+        Used by the agent locally.
+        """
+        config_path = WG_CONF_PATH.replace('X', str(wg_id))
+        peer_entry = f"""
+[Peer]
+# {client_name}
+PublicKey = {client_public_key}
+AllowedIPs = {client_ip}/32
+"""
+        try:
+            with open(config_path, "a") as f:
+                f.write(peer_entry)
+            self.run_command(f"sudo bash -c 'wg syncconf wg{wg_id} <(wg-quick strip wg{wg_id})'")
+            print(f"[+] Client '{client_name}' added to wg{wg_id} config.")
+        except Exception as e:
+            raise CommandExecutionError(f"Failed to add client '{client_name}' to WireGuard configuration: {e}")
+
+    def _remove_peer_from_config(self, wg_id: int, client_name: str):
+        """
+        Removes a client peer entry from the WireGuard configuration file.
+        Used by the agent locally.
+        """
+        config_path = WG_CONF_PATH.replace('X', str(wg_id))
+
+        if not os.path.exists(config_path):
+            print(f"[!] WireGuard config file {config_path} not found. Cannot remove peer from config.")
+            return
+
+        self._backup_config(wg_id)
+
+        try:
+            with open(config_path, "r") as f:
+                lines = f.readlines()
+
+            new_lines = []
+            in_peer_block = False
+            peer_block_to_delete = False
+            temp_block = []
+
+            for line in lines:
+                if line.strip().startswith("[Peer]"):
+                    if in_peer_block:
+                        if not peer_block_to_delete:
+                            new_lines.extend(temp_block)
+                    temp_block = [line]
+                    in_peer_block = True
+                    peer_block_to_delete = False
+                elif in_peer_block:
+                    temp_block.append(line)
+                    if f"# {client_name}" in line.strip():
+                        peer_block_to_delete = True
+                    if not line.strip() and in_peer_block:
+                        if not peer_block_to_delete:
+                            new_lines.extend(temp_block)
+                        in_peer_block = False
+                        temp_block = []
+                else:
+                    new_lines.append(line)
+
+            if in_peer_block and not peer_block_to_delete:
+                new_lines.extend(temp_block)
+
+            if peer_block_to_delete:
+                with open(config_path, "w") as f:
+                    f.writelines(new_lines)
+                self.run_command(f"sudo bash -c 'wg syncconf wg{wg_id} <(wg-quick strip wg{wg_id})'")
+                print(f"[+] Client '{client_name}' removed from wg{wg_id} config.")
+            else:
+                print(f"[!] Client '{client_name}' peer block not found in config file. No changes made to config.")
+
+        except Exception as e:
+            raise CommandExecutionError(f"Error removing client '{client_name}' from WireGuard configuration: {e}")
+
+
+    def _get_current_wg_peer_traffic(self, wg_id: int) -> dict:
+        """
+        Retrieves current traffic statistics (rx, tx) for all WireGuard peers
+        on a specific interface from 'wg show dump'.
+        Returns a dictionary: {public_key: {'rx': int, 'tx': int}}
+        Used by the agent locally.
+        """
+        traffic_data = {}
+        try:
+            result = subprocess.run(['sudo', 'wg', 'show', f"wg{wg_id}", 'dump'], capture_output=True, text=True, check=True)
+            output_lines = result.stdout.strip().splitlines()
+
+            for line in output_lines:
+                parts = line.strip().split('\t')
+
+                if len(parts) == 8:
+                    try:
+                        pubkey = parts[0]
+                        rx = int(parts[5])
+                        tx = int(parts[6])
+                        traffic_data[pubkey] = {'rx': rx, 'tx': tx}
+                    except (ValueError, IndexError) as e:
+                        print(f"Warning: Could not parse wg dump peer line: '{line.strip()}'. Error: {e}")
+                elif len(parts) == 4:
+                    pass
+                else:
+                    print(f"Warning: Unexpected line format or number of parts in wg dump output: '{line.strip()}'")
+
+        except subprocess.CalledProcessError as e:
+            print(f"Warning: Failed to run `sudo wg show wg{wg_id} dump`. Error: {e.stderr.strip()}. Please ensure WireGuard is installed and you have appropriate permissions (e.g., sudo access).")
+        except Exception as e:
+            print(f"An unexpected error occurred while getting traffic for wg{wg_id}: {e}")
+        return traffic_data
+
+    # Modified: _install_candy_panel to self-register central server as agent
+    def _install_candy_panel(self, server_ip: str,
+                         wg_port: str,
+                         wg_address_range: str = "10.0.0.1/24",
+                         wg_dns: str = "8.8.8.8",
+                         admin_user: str = 'admin',
+                         admin_password: str = 'admin') -> tuple[bool, str]:
+        """
+        Installs WireGuard and initializes the CandyPanel server configuration.
+        This runs on the central panel machine during its initial setup.
+        It also self-registers this central server as the first managed agent.
+        """
+        if not self._is_valid_ip(server_ip):
+            return False, 'IP INCORRECT'
+        install_status = self.db.get('settings',where={'key':'install'})
+        if bool(install_status and install_status['value'] == '1') : return False , 'Installed before !'
+
+        # --- Initial WireGuard Setup on Central Panel (as it was before) ---
+        print("[+] Updating system and installing WireGuard...")
+        try:
+            self.run_command("sudo apt update")
+            self.run_command("sudo apt upgrade -y")
+            self.run_command("sudo apt install -y wireguard qrencode")
+        except Exception as e:
+            return False, f"Failed to install WireGuard dependencies: {e}"
+
+        print("[+] Installing and configuring UFW...")
+        try:
+            self.run_command("sudo apt install -y ufw")
+            self.run_command("sudo ufw default deny incoming")
+            self.run_command("sudo ufw default allow outgoing")
+            self.run_command(f"sudo ufw allow {wg_port}/udp")
+            self.run_command("sudo ufw allow ssh")
+            ap_port = os.environ.get('AP_PORT', '3446') # Central panel's own API port
+            agent_port = os.environ.get('AGENT_PORT', '3447') # Central panel's agent port
+            self.run_command(f"sudo ufw allow {ap_port}/tcp")
+            self.run_command(f"sudo ufw allow {agent_port}/tcp") # Open port for central agent
+            self.run_command("sudo ufw --force enable")
+            print("[+] UFW configured successfully.")
+        except Exception as e:
+            return False, f"Failed to configure UFW: {e}"
+
+        print("[+] Enabling IP forwarding...")
+        try:
+            self.run_command("sudo sysctl -w net.ipv4.ip_forward=1")
+            self.run_command("sudo sysctl -w net.ipv6.conf.all.forwarding=1")
+            sysctl_conf_path = "/etc/sysctl.conf"
+            with open(sysctl_conf_path, 'r+') as f:
+                content = f.read()
+                if 'net.ipv4.ip_forward = 1' not in content:
+                    f.write("\nnet.ipv4.ip_forward = 1\n")
+                if 'net.ipv6.conf.all.forwarding = 1' not in content:
+                    f.write("net.ipv6.conf.all.forwarding = 1\n")
+            self.run_command("sudo sysctl -p")
+            print("[+] IP forwarding enabled successfully.")
+        except Exception as e:
+            return False, f"Failed to enable IP forwarding: {e}"
+
+
+        print("[+] Creating /etc/wireguard if not exists...")
+        os.makedirs("/etc/wireguard", exist_ok=True)
+        os.chmod("/etc/wireguard", 0o700)
+
+        wg_id = 0 # Default initial interface ID
+        default_interface = self._get_default_interface()
+        interface_name = f"wg{wg_id}"
+        server_private_key_path = SERVER_PRIVATE_KEY_PATH.replace('X', str(wg_id))
+        server_public_key_path = SERVER_PUBLIC_KEY_PATH.replace('X', str(wg_id))
+        wg_conf_path = WG_CONF_PATH.replace('X', str(wg_id))
+
+        private_key, public_key = "", ""
+        if not os.path.exists(server_private_key_path):
+            print("[+] Generating server private/public keys...")
+            private_key, public_key = self._generate_keypair()
+            with open(server_private_key_path, "w") as f:
+                f.write(private_key)
+            os.chmod(server_private_key_path, 0o600)
+            with open(server_public_key_path, "w") as f:
+                f.write(public_key)
+        else:
+            with open(server_private_key_path) as f:
+                private_key = f.read().strip()
+            with open(server_public_key_path) as f:
+                public_key = f.read().strip()
+
+        wg_conf = f"""
+    [Interface]
+    Address = {wg_address_range}
+    ListenPort = {wg_port}
+    PrivateKey = {private_key}
+    MTU = 1420
+    DNS = 8.8.8.8
+
+    PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
+    PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
+        """.strip()
+
+        with open(wg_conf_path, "w") as f:
+            f.write(wg_conf + "\n")
+        os.chmod(wg_conf_path, 0o600)
+
+        # Update initial settings (e.g., server IP, DNS, admin credentials) for central panel
+        self.db.update('settings', {'value': server_ip}, {'key': 'server_ip'})
+        self.db.update('settings', {'value': server_ip}, {'key': 'custom_endpont'})
+        self.db.update('settings', {'value': wg_dns}, {'key': 'dns'})
+        admin_data = json.dumps({'user': admin_user, 'password': admin_password})
+        self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
+        self.db.update('settings', {'value': '1'}, {'key': 'install'})
+
+        # Cron job for central panel's sync (already there)
+        current_dir = os.path.abspath(os.path.dirname(__file__))
+        cron_script_path = os.path.join(current_dir, 'cron.py')
+        backend_dir = os.path.dirname(cron_script_path)
+        cron_line = f"*/5 * * * * cd {backend_dir} && python3 {cron_script_path} >> /var/log/candy-sync.log 2>&1"
+        self.run_command(f'(crontab -l 2>/dev/null; echo "{cron_line}") | crontab -')
+
+        # --- Self-Register Central Panel as the First Managed Server ---
+        print("[+] Self-registering central panel as the first managed server...")
+        central_agent_ip = "127.0.0.1" # Agent runs locally
+        central_agent_port = int(os.environ.get('AGENT_PORT', '3447')) # Assuming agent listens on 3447
+
+        # Generate a unique API key for the central server's agent.
+        # This key should be stored securely and passed to the agent's environment.
+        central_agent_api_key = os.environ.get('AGENT_API_KEY_CENTRAL', str(uuid.uuid4())) # Use env var or generate
+
+        # First, add the central server as a managed server
+        success_add_server, msg_add_server, new_server_id =  self.add_server(
+            name="Central Panel Server",
+            ip_address=central_agent_ip,
+            agent_port=central_agent_port,
+            api_key=central_agent_api_key,
+            description="This server runs the central CandyPanel.",
+        )
+        if not success_add_server:
+            return False, f"Failed to self-register central server: {msg_add_server}"
+
+        # Now, insert the initial wg0 interface and link it to this new server_id
+        if not self.db.has('interfaces', {'wg': wg_id, 'server_id': new_server_id}):
+            self.db.insert('interfaces', {
+                'wg': wg_id,
+                'server_id': new_server_id, # Link to self-registered server
+                'private_key': private_key,
+                'public_key': public_key,
+                'port': wg_port, # The WireGuard port for this interface
+                'address_range': wg_address_range,
+                'status': True
+            })
+
+        print(f"[+] Central panel self-registered as Server ID: {new_server_id}. Initial interface wg{wg_id} linked.")
+
+        # Ensure the central panel's WireGuard interface starts
+        try:
+            self.run_command(f"sudo systemctl enable wg-quick@wg{wg_id}")
+            self.run_command(f"sudo systemctl start wg-quick@wg{wg_id}")
+        except Exception as e:
+            print(f"[!] Warning: Failed to start central WireGuard service wg{wg_id}: {e}")
+            # Do not fail installation for this, but warn
+
+        return True, 'Installed successfully! Central server self-registered.'
+
+
+    def _admin_login(self, user: str, password: str) -> tuple[bool, str]:
+        """
+        Authenticates an admin user for the local agent's panel (if accessed directly).
+        WARNING: Password stored in plaintext in DB. This should be hashed!
+        """
+        admin_settings = json.loads(self.db.get('settings', where={'key': 'admin'})['value'])
+        if admin_settings.get('user') == user and admin_settings.get('password') == password:
+            session_token = str(uuid.uuid4())
+            self.db.update('settings', {'value': session_token}, {'key': 'session_token'})
+            return True, session_token
+        else:
+            return False, 'Wrong username or password!'
+
+    # Modified: _dashboard_stats no longer takes server_id (it's called by agent locally or centrally calls agent)
+    def _dashboard_stats(self) -> dict:
+        """
+        Retrieves various system and application statistics for the dashboard.
+        This method will be called locally by the agent to get its server's stats.
+        """
+        mem = psutil.virtual_memory()
+        net1 = psutil.net_io_counters()
+        time.sleep(1) # Wait for 1 second to calculate network speed
+        net2 = psutil.net_io_counters()
+
+        bytes_sent = net2.bytes_sent - net1.bytes_sent
+        bytes_recv = net2.bytes_recv - net1.bytes_recv
+        upload_speed_kbps = bytes_sent / 1024 # KB/s
+        download_speed_kbps = bytes_recv / 1024 # KB/s
+
+        return {
+            'cpu': f"{psutil.cpu_percent()}%",
+            'mem': {
+                'total': f"{mem.total / (1024**3):.2f} GB",
+                'available': f"{mem.available / (1024**3):.2f} GB",
+                'usage': f"{mem.percent}%"
+            },
+            'clients_count': self.db.count('clients'),
+            'status': self.db.get('settings', where={'key': 'status'})['value'],
+            'alert': json.loads(self.db.get('settings', where={'key': 'alert'})['value']),
+            'bandwidth': self.db.get('settings', where={'key': 'bandwidth'})['value'],
+            'uptime': self.db.get('settings', where={'key': 'uptime'})['value'],
+            'net': {'download': f"{download_speed_kbps:.2f} KB/s", 'upload': f"{upload_speed_kbps:.2f} KB/s"}
+        }
+    
+    # New: Helper to get live dashboard stats for a specific server (from agent)
+    def _dashboard_stats_for_server(self, server_id: int) -> dict:
         """
         Fetches live dashboard statistics from a specific remote agent.
         """
@@ -147,7 +622,7 @@ class CentralPanelManager:
         if not agent:
             return {"success": False, "message": f"Server with ID {server_id} not found or agent not configured."}
         try:
-            response = await agent.post("/dashboard")
+            response =  agent.post("/dashboard")
             return response # Returns the full API response (success, message, data)
         except Exception as e:
             return {"success": False, "message": f"Failed to get dashboard stats from agent: {e}"}
@@ -158,12 +633,16 @@ class CentralPanelManager:
         """
         Retrieves all client records from the database.
         If server_id is provided, it's for the central panel fetching clients for a specific server.
+        If server_id is None, it's for the agent getting its local clients.
         """
-        return self.db.select('clients', where={'server_id': server_id})
+        if server_id is not None: # Central panel requesting clients for a specific server
+            return self.db.select('clients', where={'server_id': server_id})
+        else: # Agent requesting its local clients (no server_id column in its local DB's clients table)
+            return self.db.select('clients')
 
 
     # Modified: _new_client now takes server_id for central panel, or operates locally on agent
-    def _new_client(self, name: str, expires: str, traffic: str, wg_id: int = 0, note: str = '', server_id: int | None = None) -> tuple[bool, str]:
+    def _new_client(self, name: str, expire: str, traffic: str, wg_id: int = 0, note: str = '', server_id: int | None = None) -> tuple[bool, str]:
         """
         Creates a new WireGuard client.
         If server_id is provided (by central panel), it orchestrates creation via remote agent.
@@ -175,63 +654,25 @@ class CentralPanelManager:
             if not agent:
                 return False, f"Server with ID {server_id} not found or agent not configured."
 
-            # Generate keys and client config logic here, and pass to the agent
-            client_private = self._generate_keypair()[0]
-            client_public = self._generate_pubkey_from_priv(client_private)
-            
-            # Get interface info from central DB
-            interface_wg = self.db.get('interfaces', where={'wg': int(wg_id), 'server_id': server_id})
-            if not interface_wg:
-                return False, f"WireGuard interface wg{wg_id} not found on server {server_id}."
-                
-            used_ips = self._get_used_ips_from_agent(server_id, wg_id)
-            
-            network_address_prefix = interface_wg['address_range'].rsplit('.', 1)[0]
-            next_ip_host_part = 2
-            
-            existing_client_ips = {c['address'] for c in self.db.select('clients', where={'server_id': server_id, 'wg': wg_id})}
-            while f"{network_address_prefix}.{next_ip_host_part}" in existing_client_ips or next_ip_host_part in used_ips:
-                next_ip_host_part += 1
-                if next_ip_host_part > 254:
-                    return False, "No available IP addresses in the subnet."
-            client_ip = f"{network_address_prefix}.{next_ip_host_part}"
-            
-            server_ip_from_db = self.db.get('servers', where={'server_id': server_id})['ip_address']
-            settings = self.db.select('settings')
-            dns = next((s['value'] for s in settings if s['key'] == 'dns'), '8.8.8.8')
-            mtu = next((s['value'] for s in settings if s['key'] == 'mtu'), '1420')
-            
-            client_config = f"""[Interface]
-PrivateKey = {client_private}
-Address = {client_ip}/32
-DNS = {dns}
-MTU = {mtu}
-
-[Peer]
-PublicKey = {interface_wg['public_key']}
-Endpoint = {server_ip_from_db}:{interface_wg['port']}
-AllowedIPs = 0.0.0.0/0, ::/0
-PersistentKeepalive = 25
-"""
-            
             try:
-                response = self.run_async_agent_command(server_id, "/client/create", {
+                # Delegate client creation to the remote agent
+                response =  agent.post("/client/create", {
                     "name": name,
-                    "public_key": client_public,
-                    "private_key": client_private,
-                    "address": client_ip,
+                    "expires": expire,
+                    "traffic": traffic,
                     "wg_id": wg_id,
+                    "note": note
                 })
                 if response.get('success'):
                     # Agent successfully created client, now store in central DB
                     self.db.insert('clients', {
                         'name': name,
                         'server_id': server_id, # Link to the server
-                        'public_key': client_public,
-                        'private_key': client_private,
-                        'address': client_ip,
+                        'public_key': response['data']['public_key'],
+                        'private_key': response['data']['private_key'],
+                        'address': response['data']['address'],
                         'created_at': datetime.now().isoformat(),
-                        'expires': expires,
+                        'expires': expire,
                         'traffic': traffic,
                         'used_trafic': json.dumps({'download': 0, 'upload': 0, 'last_wg_rx': 0, 'last_wg_tx': 0}),
                         'wg': wg_id,
@@ -239,7 +680,7 @@ PersistentKeepalive = 25
                         'connected_now': False,
                         'status': True
                     })
-                    return True, client_config # Return client config from agent
+                    return True, response['data']['client_config'] # Return client config from agent
                 return False, response.get('message', 'Unknown error from agent.')
             except Exception as e:
                 return False, f"Failed to create client on remote server: {e}"
@@ -297,7 +738,7 @@ PersistentKeepalive = 25
                 'private_key': client_private,
                 'address': client_ip,
                 'created_at': datetime.now().isoformat(),
-                'expires': expires,
+                'expires': expire,
                 'traffic': traffic,
                 'used_trafic': initial_used_traffic,
                 'wg': wg_id,
@@ -324,7 +765,7 @@ PersistentKeepalive = 25
                 return False, f"Server with ID {server_id} not found or agent not configured."
             try:
                 # Delegate to agent
-                response = self.run_async_agent_command(server_id, "/client/update", {"name": client_name, "public_key": client_record['public_key'], "address": client_record['address'], "status": False})
+                response =  agent.post("/client/update", {"name": client_name, "status": False})
                 if response.get('success'):
                     self.db.update('clients', {'status': False}, {'name': client_name, 'server_id': server_id})
                     return True, response.get('message', f"Client '{client_name}' disabled successfully on server {server_id}.")
@@ -338,7 +779,7 @@ PersistentKeepalive = 25
 
             wg_id = client['wg']
             try:
-                self._remove_peer_from_config(wg_id, client['name'])
+                self._remove_peer_from_config(wg_id, client_name)
             except CommandExecutionError as e:
                 print(f"[!] Error during peer removal from config for disabling: {e}. Proceeding with DB status update.")
                 return False, f"Failed to remove peer from config: {e}"
@@ -363,7 +804,7 @@ PersistentKeepalive = 25
             if not agent:
                 return False, f"Server with ID {server_id} not found or agent not configured."
             try:
-                response = self.run_async_agent_command(server_id, "/client/delete", {"name": client_name})
+                response =  agent.post("/client/delete", {"name": client_name})
                 if response.get('success'):
                     self.db.delete('clients', {'name': client_name, 'server_id': server_id})
                     return True, response.get('message', f"Client '{client_name}' deleted successfully from server {server_id}.")
@@ -387,7 +828,7 @@ PersistentKeepalive = 25
 
 
     # Modified: _edit_client takes server_id or operates locally
-    def _edit_client(self, name: str, expires: str = None, traffic: str = None, status: bool = None, note: str = None, server_id: int | None = None) -> tuple[bool, str]:
+    def _edit_client(self, name: str, expire: str = None, traffic: str = None, status: bool = None, note: str = None, server_id: int | None = None) -> tuple[bool, str]:
         """
         Edits an existing client's details.
         If server_id is provided (by central panel), it orchestrates via remote agent.
@@ -403,17 +844,17 @@ PersistentKeepalive = 25
                 return False, f"Server with ID {server_id} not found or agent not configured."
 
             update_data_agent = {"name": name}
-            if expires is not None: update_data_agent['expires'] = expires
+            if expire is not None: update_data_agent['expires'] = expire
             if traffic is not None: update_data_agent['traffic'] = traffic
             if status is not None: update_data_agent['status'] = status
             if note is not None: update_data_agent['note'] = note
 
             try:
-                response = self.run_async_agent_command(server_id, "/client/update", update_data_agent)
+                response =  agent.post("/client/update", update_data_agent)
                 if response.get('success'):
                     # Update central DB
                     update_data_central = {}
-                    if expires is not None: update_data_central['expires'] = expires
+                    if expire is not None: update_data_central['expires'] = expire
                     if traffic is not None: update_data_central['traffic'] = traffic
                     if status is not None: update_data_central['status'] = status
                     if note is not None: update_data_central['note'] = note
@@ -430,8 +871,8 @@ PersistentKeepalive = 25
 
             update_data = {}
 
-            if expires is not None:
-                update_data['expires'] = expires
+            if expire is not None:
+                update_data['expires'] = expire
             if traffic is not None:
                 update_data['traffic'] = traffic
             if note is not None:
@@ -472,7 +913,7 @@ PersistentKeepalive = 25
                 return False, f"Server with ID {server_id} not found or agent not configured."
 
             # Check for existing port or address range conflicts on the target server
-            existing_interfaces = self.db.select('interfaces', where={'server_id': server_id})
+            existing_interfaces =  self.db.select('interfaces', where={'server_id': server_id})
             for interface in existing_interfaces:
                 if int(interface['port']) == port:
                     return False, f"An interface with port {port} already exists on server {server_id}."
@@ -480,7 +921,7 @@ PersistentKeepalive = 25
                     return False, f"An interface with address range {address_range} already exists on server {server_id}."
 
             try:
-                response = self.run_async_agent_command(server_id, "/interface/create", {"address_range": address_range, "port": port, "server_id": server_id})
+                response =  agent.post("/interface/create", {"address_range": address_range, "port": port, "server_id": server_id})
                 if response.get('success'):
                     # Agent successfully created interface, now store its details in central DB
                     interface_details = response['data'] # Agent now returns these details explicitly
@@ -518,10 +959,10 @@ PersistentKeepalive = 25
             path = self._get_interface_path(interface_name)
             print("[+] Installing and configuring UFW...")
             try:
-                self._run_command("sudo ufw default deny incoming")
-                self._run_command("sudo ufw default allow outgoing")
-                self._run_command(f"sudo ufw allow {port}/udp")
-                self._run_command("sudo ufw --force enable")
+                self.run_command("sudo ufw default deny incoming")
+                self.run_command("sudo ufw default allow outgoing")
+                self.run_command(f"sudo ufw allow {port}/udp")
+                self.run_command("sudo ufw --force enable")
                 print("[+] UFW configured successfully.")
             except Exception as e:
                 return False, f"Failed to configure UFW: {e}"
@@ -551,7 +992,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                     f.write(config)
                 os.chmod(path, 0o600)
                 print(f"[+] Interface {interface_name} created.")
-                self._run_command(f"sudo systemctl enable wg-quick@{interface_name}")
+                self.run_command(f"sudo systemctl enable wg-quick@{interface_name}")
                 self._reload_wireguard(new_wg_id)
             except Exception as e:
                 return False, f"Failed to create or reload interface {interface_name}: {e}"
@@ -597,7 +1038,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
             if status is not None: update_data_agent['status'] = status
 
             try:
-                response = self.run_async_agent_command(server_id, "/interface/update", update_data_agent)
+                response =  agent.post("/interface/update", update_data_agent)
                 if response.get('success'):
                     # Update central DB
                     update_data_central = {}
@@ -655,10 +1096,10 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                     update_data['status'] = status
                     service_action_needed = True
                     if status:
-                        self._run_command(f"sudo systemctl start wg-quick@{name}")
+                        self.run_command(f"sudo systemctl start wg-quick@{name}")
                         print(f"[+] Interface {name} started.")
                     else:
-                        self._run_command(f"sudo systemctl stop wg-quick@{name}")
+                        self.run_command(f"sudo systemctl stop wg-quick@{name}")
                         print(f"[+] Interface {name} stopped.")
 
                 if update_data:
@@ -688,7 +1129,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                 return False, f"Server with ID {server_id} not found or agent not configured."
 
             try:
-                response = self.run_async_agent_command(server_id, "/interface/delete", {"wg_id": wg_id})
+                response =  agent.post("/interface/delete", {"wg_id": wg_id})
                 if response.get('success'):
                     self.db.delete('interfaces', {'wg': wg_id, 'server_id': server_id})
                     # Also delete associated clients from central DB
@@ -704,8 +1145,8 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                 return False, f"Interface {interface_name} not found."
 
             try:
-                self._run_command(f"sudo systemctl stop wg-quick@{interface_name}", check=False)
-                self._run_command(f"sudo systemctl disable wg-quick@{interface_name}", check=False)
+                self.run_command(f"sudo systemctl stop wg-quick@{interface_name}", check=False)
+                self.run_command(f"sudo systemctl disable wg-quick@{interface_name}", check=False)
                 print(f"[+] WireGuard service wg-quick@{interface_name} stopped and disabled.")
 
                 config_path = WG_CONF_PATH.replace('X', str(wg_id))
@@ -751,24 +1192,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
             if not agent:
                 return False, f"Server with ID {server_id} not found or agent not configured."
             try:
-                # Pass all necessary data for the agent to generate the config string
-                client_data = self.db.get('clients', {'name': name, 'server_id': server_id})
-                interface_data = self.db.get('interfaces', {'wg': client_data['wg'], 'server_id': server_id})
-                server_data = self.db.get('servers', {'server_id': server_id})
-                settings = self.db.select('settings')
-                
-                payload = {
-                    "name": name,
-                    "public_key": client_data['public_key'],
-                    "private_key": client_data['private_key'],
-                    "address": client_data['address'],
-                    "server_endpoint_ip": server_data['ip_address'],
-                    "interface_port": interface_data['port'],
-                    "server_dns": next((s['value'] for s in settings if s['key'] == 'dns'), '8.8.8.8'),
-                    "server_mtu": next((s['value'] for s in settings if s['key'] == 'mtu'), '1420')
-                }
-                
-                response = self.run_async_agent_command(server_id, "/client/get_config", payload)
+                response =  agent.post("/client/get_config", {"name": name})
                 if response.get('success'):
                     return True, response['data']['config']
                 return False, response.get('message', f"Failed to get config for client '{name}' from agent.")
@@ -905,7 +1329,7 @@ PersistentKeepalive = 25
 
             try:
                 # Get live data from agent
-                response = self.run_async_agent_command(server_id, "/client/get_details", {"name": name, "public_key": public_key})
+                response = agent.post("/client/get_details", {"name": name, "public_key": public_key})
                 if response.get('success') and response.get('data'):
                     agent_data = response['data']
                     client.update(agent_data)
@@ -927,7 +1351,7 @@ PersistentKeepalive = 25
 
                 try:
                     # Query agent for client details by name & public key
-                    response = self.run_async_agent_command(current_server_id, "/client/get_details", {"name": name, "public_key": public_key})
+                    response = agent.post("/client/get_details", {"name": name, "public_key": public_key})
                     if response.get('success') and response.get('data'):
                         client_data = response['data']
                         # Ensure server-specific endpoint/DNS/MTU are correct for config generation
@@ -1113,7 +1537,7 @@ PersistentKeepalive = 25
 
             try:
                 # Get current traffic for all peers from the agent
-                response = self.run_async_agent_command(server_id, "/traffic/dump")
+                response =  agent.post("/traffic/dump")
                 if not response.get('success') or not response.get('data'):
                     print(f"Error fetching traffic dump from agent {server_id}: {response.get('message', 'No data')}")
                     return
@@ -1263,13 +1687,13 @@ PersistentKeepalive = 25
 
             print(f"[*] Initiating sync on remote server {server_id}...")
             try:
-                response = self.run_async_agent_command(server_id, "/sync")
+                response =  agent.post("/sync")
                 if response.get('success'):
                     print(f"[*] Remote sync initiated successfully on server {server_id}.")
                     # After remote sync, pull traffic data and update central DB
                     self._calculate_and_update_traffic(server_id)
                     # Pull dashboard stats and update central DB cache
-                    dashboard_stats_from_agent_response = self.run_async_agent_command(server_id, "/dashboard")
+                    dashboard_stats_from_agent_response =  agent.post("/dashboard")
                     if dashboard_stats_from_agent_response.get('success') and dashboard_stats_from_agent_response.get('data'):
                         self.db.update('servers',
                                        {'status': 'active',
@@ -1385,7 +1809,7 @@ PersistentKeepalive = 25
                 print(f"[*] Updated ap_port in settings to reflect environment variable: {actual_ap_port}")
             print("[*] Fetching and caching local dashboard stats for self-registered server...")
             try:
-                local_dashboard_stats = self._dashboard_stats() # Get local stats
+                local_dashboard_stats =  self._dashboard_stats() # Get local stats
                 # Assuming the central panel itself is server_id = 1
                 self.db.update('servers',
                                {'status': 'active', # Ensure local server is marked active

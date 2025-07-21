@@ -6,17 +6,17 @@ import sys
 import asyncio
 
 try:
-    from core import LocalAgentRunner, CommandExecutionError
+    from core import CandyPanel, CommandExecutionError
+    from db import SQLite
 except ImportError as e:
     print(f"Error importing core modules: {e}")
-    print("Please ensure 'core.py' is accessible in the agent's environment.")
+    print("Please ensure 'core.py' and 'db.py' are accessible in the agent's environment.")
     sys.exit(1)
 
 
 app = Flask(__name__)
 
-# The agent now uses a stateless runner, not a full CandyPanel instance
-local_agent_runner = LocalAgentRunner()
+agent_candy_panel = CandyPanel(db_path='CandyPanel.db')
 AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "DEBUG_AGENT_API_KEY_CHANGE_ME")
 
 def authenticate_agent(f):
@@ -50,7 +50,7 @@ async def agent_get_dashboard_stats():
     """
     try:
         # Calls the local CandyPanel instance's _dashboard_stats method
-        stats = await asyncio.to_thread(local_agent_runner._dashboard_stats)
+        stats = await asyncio.to_thread(agent_candy_panel._dashboard_stats)
         return success_response("Dashboard stats retrieved.", data=stats)
     except Exception as e:
         return error_response(f"Failed to get local dashboard stats: {e}", 500)
@@ -63,18 +63,30 @@ async def agent_create_client():
     """
     data = request.json
     name = data.get('name')
-    public_key = data.get('public_key')
-    private_key = data.get('private_key')
-    address = data.get('address')
-    wg_id = data.get('wg_id', 0)
-    
-    if not all([name, public_key, private_key, address]):
-        return error_response("Missing required fields for client creation.", 400)
+    expires = data.get('expires')
+    traffic = data.get('traffic')
+    wg_id = data.get('wg_id', 0) # Default to wg0 if not specified
+    note = data.get('note', '')
+
+    if not all([name, expires, traffic]):
+        return error_response("Missing required fields (name, expires, traffic) for client creation.", 400)
 
     try:
-        # Calls the local runner to create the client config entry
-        await asyncio.to_thread(local_agent_runner._add_peer_to_config, wg_id, name, public_key, address)
-        return success_response("Client created locally.")
+        # Calls the local CandyPanel instance's _new_client method
+        success, config_or_message = await asyncio.to_thread(agent_candy_panel._new_client, name, expires, traffic, wg_id, note)
+        if success:
+            # Need to return public_key, private_key, address for central panel to store
+            client_details = await asyncio.to_thread(agent_candy_panel.db.get, 'clients', {'name': name})
+            if client_details:
+                return success_response("Client created locally.", data={
+                    "client_config": config_or_message, # This is the actual client config string
+                    "public_key": client_details['public_key'],
+                    "private_key": client_details['private_key'],
+                    "address": client_details['address']
+                })
+            else:
+                return error_response("Client created but details not found in local DB.", 500)
+        return error_response(config_or_message, 400)
     except CommandExecutionError as e:
         return error_response(f"Agent failed to create client (command error): {e}", 500)
     except Exception as e:
@@ -88,23 +100,19 @@ async def agent_update_client():
     """
     data = request.json
     name = data.get('name')
-    public_key = data.get('public_key')
-    address = data.get('address')
-    status = data.get('status')
-    
+    expires = data.get('expires')
+    traffic = data.get('traffic')
+    status = data.get('status') # boolean
+    note = data.get('note')
+
     if not name:
         return error_response("Missing client name for update.", 400)
 
     try:
-        # The agent now only needs to know about the name and public key to update the config file
-        if status is not None:
-            if status:
-                await asyncio.to_thread(local_agent_runner._add_peer_to_config, 0, name, public_key, address)
-                return success_response("Client enabled successfully.")
-            else:
-                await asyncio.to_thread(local_agent_runner._remove_peer_from_config, 0, name)
-                return success_response("Client disabled successfully.")
-        return success_response("Update request received, no action taken.")
+        success, message = await asyncio.to_thread(agent_candy_panel._edit_client, name, expires, traffic, status, note)
+        if success:
+            return success_response(message)
+        return error_response(message, 400)
     except CommandExecutionError as e:
         return error_response(f"Agent failed to update client (command error): {e}", 500)
     except Exception as e:
@@ -118,14 +126,15 @@ async def agent_delete_client():
     """
     data = request.json
     name = data.get('name')
-    wg_id = data.get('wg_id')
 
-    if not all([name, wg_id is not None]):
-        return error_response("Missing client name or wg_id for deletion.", 400)
+    if not name:
+        return error_response("Missing client name for deletion.", 400)
 
     try:
-        await asyncio.to_thread(local_agent_runner._remove_peer_from_config, wg_id, name)
-        return success_response("Client deleted locally.")
+        success, message = await asyncio.to_thread(agent_candy_panel._delete_client, name)
+        if success:
+            return success_response(message)
+        return error_response(message, 400)
     except CommandExecutionError as e:
         return error_response(f"Agent failed to delete client (command error): {e}", 500)
     except Exception as e:
@@ -139,20 +148,15 @@ async def agent_get_client_config():
     """
     data = request.json
     name = data.get('name')
-    public_key = data.get('public_key')
-    private_key = data.get('private_key')
-    address = data.get('address')
-    server_endpoint_ip = data.get('server_endpoint_ip')
-    interface_port = data.get('interface_port')
-    server_dns = data.get('server_dns')
-    server_mtu = data.get('server_mtu')
-    
-    if not all([name, public_key, private_key, address, server_endpoint_ip, interface_port, server_dns, server_mtu]):
-        return error_response("Missing required data for config generation.", 400)
-        
+
+    if not name:
+        return error_response("Missing client name to get config.", 400)
+
     try:
-        config_content = await asyncio.to_thread(local_agent_runner._get_client_config_string, private_key, address, server_endpoint_ip, interface_port, server_dns, server_mtu)
-        return success_response("Client config retrieved.", data={"config": config_content})
+        success, config_content = await asyncio.to_thread(agent_candy_panel._get_client_config, name)
+        if success:
+            return success_response("Client config retrieved.", data={"config": config_content})
+        return error_response(config_content, 404)
     except Exception as e:
         return error_response(f"Agent failed to get client config: {e}", 500)
 
@@ -166,13 +170,27 @@ async def agent_create_interface():
     data = request.json
     address_range = data.get('address_range')
     port = data.get('port')
-    
+    server_id = data.get('server_id')
     if not all([address_range, port]):
         return error_response("Missing address_range or port for interface creation.", 400)
 
     try:
-        interface_details = await asyncio.to_thread(local_agent_runner._new_interface_wg, address_range, port)
-        return success_response("New Interface Created!", data=interface_details)
+        # The _new_interface_wg function in core.py (when called locally by agent)
+        # now returns a JSON string with the new interface details.
+        success, message_json_str = await asyncio.to_thread(agent_candy_panel._new_interface_wg, address_range, port,server_id)
+        if success:
+            # Parse the JSON string returned by _new_interface_wg
+            interface_details = json.loads(message_json_str)
+            return success_response(
+                interface_details.get("message", "New Interface Created!"),
+                data={
+                    "wg_id": interface_details["wg_id"],
+                    "private_key": interface_details["private_key"],
+                    "public_key": interface_details["public_key"],
+                    "server_id":server_id
+                }
+            )
+        return error_response(message_json_str, 400) # message_json_str here would be an error string if not success
     except CommandExecutionError as e:
         return error_response(f"Agent failed to create interface (command error): {e}", 500)
     except Exception as e:
@@ -195,7 +213,7 @@ async def agent_update_interface():
         return error_response("Missing interface name for update.", 400)
 
     try:
-        success, message = await asyncio.to_thread(local_agent_runner._edit_interface, name, address, port, status)
+        success, message = await asyncio.to_thread(agent_candy_panel._edit_interface, name, address, port, status)
         if success:
             return success_response(message)
         return error_response(message, 400)
@@ -217,7 +235,7 @@ async def agent_delete_interface():
         return error_response("Missing wg_id for interface deletion.", 400)
 
     try:
-        success, message = await asyncio.to_thread(local_agent_runner._delete_interface, wg_id)
+        success, message = await asyncio.to_thread(agent_candy_panel._delete_interface, wg_id)
         if success:
             return success_response(message)
         return error_response(message, 400)
@@ -233,7 +251,7 @@ async def agent_trigger_sync():
     Triggers a local sync process on this server.
     """
     try:
-        await asyncio.to_thread(local_agent_runner._sync)
+        await asyncio.to_thread(agent_candy_panel._sync)
         return success_response("Local synchronization initiated successfully.")
     except Exception as e:
         return error_response(f"Agent failed to trigger sync: {e}", 500)
@@ -245,7 +263,12 @@ async def agent_get_traffic_dump():
     Retrieves raw WireGuard peer traffic data for all interfaces on this server.
     """
     try:
-        full_traffic_data = await asyncio.to_thread(local_agent_runner._get_all_wg_peer_traffic)
+        all_interfaces = await asyncio.to_thread(agent_candy_panel.db.select, 'interfaces')
+        full_traffic_data = {}
+        for iface in all_interfaces:
+            wg_id = iface['wg']
+            x = await asyncio.to_thread(agent_candy_panel._get_current_wg_peer_traffic, wg_id)
+            full_traffic_data.update(x)
         return success_response("Traffic dump retrieved.", data={"traffic_data": full_traffic_data})
     except Exception as e:
         return error_response(f"Failed to retrieve traffic dump: {e}", 500)
@@ -266,7 +289,7 @@ async def agent_get_client_details():
 
     try:
         # Call the local method to get client details
-        client_data = await asyncio.to_thread(local_agent_runner._get_client_by_name_and_public_key, name, public_key)
+        client_data = await asyncio.to_thread(agent_candy_panel._get_client_by_name_and_public_key, name, public_key)
         if client_data:
             # Ensure sensitive info like private_key is removed before sending back
             client_data.pop('private_key', None)
