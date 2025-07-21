@@ -694,7 +694,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
             if self.db.has('clients', {'name': name}): # Agent's local client name check
                 return False, 'Client with this name already exists.'
 
-            interface_wg = self.db.get('interfaces', where={'wg': wg_id})
+            interface_wg = self.db.get('interfaces', where={'wg': int(wg_id)})
             if not interface_wg:
                 return False, f"WireGuard interface wg{wg_id} not found."
 
