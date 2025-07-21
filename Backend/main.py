@@ -7,12 +7,12 @@ from datetime import datetime, timedelta
 import os
 import uuid
 # Import your CandyPanel logic
-from core import CandyPanel, CommandExecutionError
+from core import CentralPanelManager, CommandExecutionError
 
 # --- Initialize CandyPanel ---
 # This is the central panel instance, so it uses 'CandyPanel.db'
 # AP_PORT for the main Flask app, AGENT_PORT for its internal agent
-candy_panel = CandyPanel(db_path='CandyPanel.db')
+central_panel_manager = CentralPanelManager(db_path='CandyPanel.db')
 
 # --- Flask Application Setup ---
 app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/static')
@@ -36,7 +36,7 @@ def authenticate_admin(f):
             abort(401, description="Unsupported authorization type")
 
         # Run synchronous DB operation in a thread pool
-        settings = await asyncio.to_thread(candy_panel.db.get, 'settings','*' ,{'key': 'session_token'})
+        settings = await asyncio.to_thread(central_panel_manager.db.get, 'settings','*' ,{'key': 'session_token'})
         if not settings or settings['value'] != token:
             abort(401, description="Invalid authentication credentials")
 
@@ -63,7 +63,7 @@ async def get_client_public_details(name: str, public_key: str):
     try:
         # Pass server_id=None to indicate that core.py should search across all managed servers.
         # This will be handled by core._get_client_by_name_and_public_key
-        client_data = await asyncio.to_thread(candy_panel._get_client_by_name_and_public_key, name, public_key, server_id=None)
+        client_data = await asyncio.to_thread(central_panel_manager._get_client_by_name_and_public_key, name, public_key, server_id=None)
         if client_data:
             return success_response("Client details retrieved successfully.", data=client_data)
         else:
@@ -76,7 +76,7 @@ async def check_installation():
     """
     Checks if the CandyPanel is installed.
     """
-    install_status = await asyncio.to_thread(candy_panel.db.get, 'settings', '*',{'key': 'install'})
+    install_status = await asyncio.to_thread(central_panel_manager.db.get, 'settings', '*' ,{'key': 'install'})
     is_installed = bool(install_status and install_status['value'] == '1')
     return jsonify({"installed": is_installed})
 
@@ -90,7 +90,7 @@ async def handle_auth():
         return error_response("Missing 'action' in request body", 400)
 
     action = data['action']
-    install_status = await asyncio.to_thread(candy_panel.db.get, 'settings', '*',{'key': 'install'})
+    install_status = await asyncio.to_thread(central_panel_manager.db.get, 'settings', '*' ,{'key': 'install'})
     is_installed = bool(install_status and install_status['value'] == '1')
 
     if action == 'login':
@@ -100,7 +100,7 @@ async def handle_auth():
         if 'username' not in data or 'password' not in data:
             return error_response("Missing username or password for login", 400)
 
-        success, message = await asyncio.to_thread(candy_panel._admin_login, data['username'], data['password'])
+        success, message = await asyncio.to_thread(central_panel_manager._admin_login, data['username'], data['password'])
         if not success:
             return error_response(message, 401)
         return success_response("Login successful!", data={"access_token": message, "token_type": "bearer"})
@@ -125,7 +125,7 @@ async def handle_auth():
         os.environ['AGENT_PORT'] = os.environ.get('AGENT_PORT', '1212')
         os.environ['AGENT_API_KEY_CENTRAL'] = os.environ.get('AGENT_API_KEY_CENTRAL', str(uuid.uuid4())) # Ensure this is generated/available
 
-        success, message = await asyncio.to_thread(candy_panel._install_candy_panel,server_ip,wg_port,wg_address_range,wg_dns,admin_user,admin_password)
+        success, message = await asyncio.to_thread(central_panel_manager._install_candy_panel,server_ip,wg_port,wg_address_range,wg_dns,admin_user,admin_password)
         
         if not success:
             return error_response(message, 400)
@@ -141,7 +141,7 @@ async def get_all_servers():
     Retrieves a list of all configured remote servers.
     """
     try:
-        servers = await asyncio.to_thread(candy_panel.get_all_servers)
+        servers = await asyncio.to_thread(central_panel_manager.get_all_servers)
         # It's better not to send API keys in this response.
         for server in servers:
             server.pop('api_key', None)
@@ -172,7 +172,7 @@ async def add_server():
         return error_response(f"Missing required field: {e}", 400)
 
     try:
-        success, message, server_id = await asyncio.to_thread(candy_panel.add_server, name, ip_address, int(agent_port), api_key, description)
+        success, message, server_id = await asyncio.to_thread(central_panel_manager.add_server, name, ip_address, int(agent_port), api_key, description)
         if success:
             return success_response(message, data={"server_id": server_id})
         return error_response(message, 400)
@@ -187,7 +187,7 @@ async def update_server(server_id: int):
     """
     data = request.json
     try:
-        success, message = await asyncio.to_thread(candy_panel.update_server,
+        success, message = await asyncio.to_thread(central_panel_manager.update_server,
                                                   server_id,
                                                   name=data.get('name'),
                                                   ip_address=data.get('ip_address'),
@@ -208,7 +208,7 @@ async def delete_server(server_id: int):
     Deletes a remote server configuration and all its associated clients/interfaces.
     """
     try:
-        success, message = await asyncio.to_thread(candy_panel.delete_server, server_id)
+        success, message = await asyncio.to_thread(central_panel_manager.delete_server, server_id)
         if success:
             return success_response(message)
         return error_response(message, 400)
@@ -226,12 +226,12 @@ async def get_server_data(server_id: int):
     """
     try:
         # Fetch individual data types from the specified agent via core.py
-        dashboard_stats_response = await asyncio.to_thread(candy_panel._dashboard_stats_for_server, server_id) # New helper in core to get live dashboard
+        dashboard_stats_response = await asyncio.to_thread(central_panel_manager._dashboard_stats_for_server, server_id) # New helper in core to get live dashboard
         if not dashboard_stats_response.get('success'):
             return error_response(f"Failed to get dashboard stats from server {server_id}: {dashboard_stats_response.get('message', 'Unknown error')}", 500)
 
-        clients_data = await asyncio.to_thread(candy_panel._get_all_clients, server_id) # Filter clients by server_id
-        interfaces_data = await asyncio.to_thread(candy_panel.db.select, 'interfaces', where={'server_id': server_id}) # Filter interfaces by server_id
+        clients_data = await asyncio.to_thread(central_panel_manager._get_all_clients, server_id) # Filter clients by server_id
+        interfaces_data = await asyncio.to_thread(central_panel_manager.db.select, 'interfaces', where={'server_id': server_id}) # Filter interfaces by server_id
 
         # Process client data (parse used_trafic)
         for client in clients_data:
@@ -241,7 +241,7 @@ async def get_server_data(server_id: int):
                 client['used_trafic'] = {"download": 0, "upload": 0}
 
         # Get central settings (not server-specific settings)
-        settings_raw = await asyncio.to_thread(candy_panel.db.select, 'settings')
+        settings_raw = await asyncio.to_thread(central_panel_manager.db.select, 'settings')
         settings_data = {setting['key']: setting['value'] for setting in settings_raw}
 
 
@@ -279,7 +279,7 @@ async def manage_resources():
                 note = data.get('note', '')
                 if not all([name, expires, traffic]):
                     return error_response("Missing name, expires, or traffic for client creation", 400)
-                success, message = await asyncio.to_thread(candy_panel._new_client, name, expires, traffic, wg_id, note, server_id=server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._new_client, name, expires, traffic, wg_id, note, server_id=server_id)
                 if not success:
                     return error_response(message, 400)
                 return success_response("Client created successfully!", data={"client_config": message})
@@ -292,7 +292,7 @@ async def manage_resources():
                 traffic = data.get('traffic')
                 status = data.get('status')
                 note = data.get('note')
-                success, message = await asyncio.to_thread(candy_panel._edit_client, name, expires, traffic, status, note, server_id=server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._edit_client, name, expires, traffic, status, note, server_id=server_id)
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)
@@ -301,7 +301,7 @@ async def manage_resources():
                 name = data.get('name')
                 if not name:
                     return error_response("Missing client name for deletion", 400)
-                success, message = await asyncio.to_thread(candy_panel._delete_client, name, server_id=server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._delete_client, name, server_id=server_id)
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)
@@ -310,7 +310,7 @@ async def manage_resources():
                 name = data.get('name')
                 if not name:
                     return error_response("Missing client name to get config", 400)
-                success, config_content = await asyncio.to_thread(candy_panel._get_client_config, name, server_id=server_id)
+                success, config_content = await asyncio.to_thread(central_panel_manager._get_client_config, name, server_id=server_id)
                 if not success:
                     return error_response(config_content, 404)
                 return success_response("Client config retrieved successfully.", data={"config": config_content})
@@ -323,7 +323,7 @@ async def manage_resources():
                 port = data.get('port')
                 if not all([address_range, port]):
                     return error_response("Missing address_range or port for interface creation", 400)
-                success, message = await asyncio.to_thread(candy_panel._new_interface_wg, address_range, port,server_id=server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._new_interface_wg, address_range, port,server_id=server_id)
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)
@@ -335,7 +335,7 @@ async def manage_resources():
                 address = data.get('address')
                 port = data.get('port')
                 status = data.get('status')
-                success, message = await asyncio.to_thread(candy_panel._edit_interface, name, address, port, status, server_id=server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._edit_interface, name, address, port, status, server_id=server_id)
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)
@@ -344,7 +344,7 @@ async def manage_resources():
                 wg_id = data.get('wg_id')
                 if wg_id is None:
                     return error_response("Missing wg_id for interface deletion", 400)
-                success, message = await asyncio.to_thread(candy_panel._delete_interface, wg_id, server_id=server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._delete_interface, wg_id, server_id=server_id)
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)
@@ -360,7 +360,7 @@ async def manage_resources():
                 return error_response("Missing key or value for setting update", 400)
             if key == 'telegram_bot_status':
                 if value == '1':
-                    bot_control_success = await asyncio.to_thread(candy_panel._manage_telegram_bot_process, 'start')
+                    bot_control_success = await asyncio.to_thread(central_panel_manager._manage_telegram_bot_process, 'start')
                     if not bot_control_success:
                         print(f"Warning: Failed to start bot immediately after setting update.")
                         # This particular setting might require a different handling in a multi-server setup,
@@ -368,11 +368,11 @@ async def manage_resources():
                         # For now, it manages the central panel's bot process.
                         return success_response(f"(Bot start attempted, but failed.)")
                 else:
-                    bot_control_success = await asyncio.to_thread(candy_panel._manage_telegram_bot_process, 'stop')
+                    bot_control_success = await asyncio.to_thread(central_panel_manager._manage_telegram_bot_process, 'stop')
                     if not bot_control_success:
                         print(f"Warning: Failed to stop bot immediately after setting update.")
                         return success_response(f"(Bot stop attempted, but failed.)")
-            success, message = await asyncio.to_thread(candy_panel._change_settings, key, value)
+            success, message = await asyncio.to_thread(central_panel_manager._change_settings, key, value)
             if not success:
                 return error_response(message, 400)
             return success_response(message)
@@ -386,7 +386,7 @@ async def manage_resources():
                 token = data.get('token')
                 if not all([name, token]):
                     return error_response("Missing name or token for API token operation", 400)
-                success, message = await asyncio.to_thread(candy_panel._add_api_token, name, token)
+                success, message = await asyncio.to_thread(central_panel_manager._add_api_token, name, token)
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)
@@ -395,7 +395,7 @@ async def manage_resources():
                 name = data.get('name')
                 if not name:
                     return error_response("Missing name for API token deletion", 400)
-                success, message = await asyncio.to_thread(candy_panel._delete_api_token, name)
+                success, message = await asyncio.to_thread(central_panel_manager._delete_api_token, name)
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)
@@ -405,7 +405,7 @@ async def manage_resources():
         elif resource == 'sync':
             if action == 'trigger':
                 # This sync action now triggers a sync on the *specified* remote server.
-                await asyncio.to_thread(candy_panel._sync, server_id=server_id)
+                await asyncio.to_thread(central_panel_manager._sync, server_id=server_id)
                 return success_response(f"Synchronization process initiated successfully on server {server_id}.")
             else:
                 return error_response(f"Invalid action '{action}' for sync resource", 400)
@@ -429,11 +429,11 @@ async def bot_register_user():
     if not telegram_id:
         return error_response("Missing telegram_id", 400)
 
-    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
+    user = await asyncio.to_thread(central_panel_manager.db.get, 'users', where={'telegram_id': telegram_id})
     if user:
         return success_response("User already registered.", data={"registered": True, "language": user.get('language', 'en')})
     
-    await asyncio.to_thread(candy_panel.db.insert, 'users', {
+    await asyncio.to_thread(central_panel_manager.db.insert, 'users', {
         'telegram_id': telegram_id,
         'created_at': datetime.now().isoformat(),
         'language': 'en'
@@ -452,10 +452,10 @@ async def bot_set_language():
     if language not in ['en', 'fa']:
         return error_response("Unsupported language. Available: 'en', 'fa'", 400)
 
-    if not await asyncio.to_thread(candy_panel.db.has, 'users', {'telegram_id': telegram_id}):
+    if not await asyncio.to_thread(central_panel_manager.db.has, 'users', {'telegram_id': telegram_id}):
         return error_response("User not registered with the bot.", 404)
 
-    await asyncio.to_thread(candy_panel.db.update, 'users', {'language': language}, {'telegram_id': telegram_id})
+    await asyncio.to_thread(central_panel_manager.db.update, 'users', {'language': language}, {'telegram_id': telegram_id})
     return success_response("Language updated successfully.")
 
 
@@ -467,13 +467,13 @@ async def bot_initiate_purchase():
     if not telegram_id:
         return error_response("Missing telegram_id", 400)
 
-    if not await asyncio.to_thread(candy_panel.db.has, 'users', {'telegram_id': telegram_id}):
+    if not await asyncio.to_thread(central_panel_manager.db.has, 'users', {'telegram_id': telegram_id}):
         return error_response("User not registered with the bot.", 404)
 
-    prices_json = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'prices'})
+    prices_json = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'prices'})
     prices = json.loads(prices_json['value']) if prices_json and prices_json['value'] else {}
 
-    admin_card_number_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'admin_card_number'})
+    admin_card_number_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'admin_card_number'})
     admin_card_number = admin_card_number_setting['value'] if admin_card_number_setting else 'YOUR_ADMIN_CARD_NUMBER'
 
     return success_response("Purchase initiation details.", data={
@@ -493,10 +493,10 @@ async def bot_calculate_price():
     if not all([telegram_id, purchase_type]):
         return error_response("Missing telegram_id or purchase_type", 400)
 
-    if not await asyncio.to_thread(candy_panel.db.has, 'users', {'telegram_id': telegram_id}):
+    if not await asyncio.to_thread(central_panel_manager.db.has, 'users', {'telegram_id': telegram_id}):
         return error_response("User not registered with the bot.", 404)
 
-    prices_json = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'prices'})
+    prices_json = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'prices'})
     prices = json.loads(prices_json['value']) if prices_json and prices_json['value'] else {}
 
     calculated_amount = 0
@@ -541,10 +541,10 @@ async def bot_submit_transaction():
     if not all([telegram_id, order_id, card_number_sent, purchase_type, amount is not None]):
         return error_response("Missing required transaction details.", 400)
 
-    if await asyncio.to_thread(candy_panel.db.has, 'transactions', {'order_id': order_id}):
+    if await asyncio.to_thread(central_panel_manager.db.has, 'transactions', {'order_id': order_id}):
         return error_response("This Order ID has already been submitted. Please use a unique one or contact support if you believe this is an error.", 400)
 
-    await asyncio.to_thread(candy_panel.db.insert, 'transactions', {
+    await asyncio.to_thread(central_panel_manager.db.insert, 'transactions', {
         'order_id': order_id,
         'telegram_id': telegram_id,
         'amount': amount,
@@ -557,7 +557,7 @@ async def bot_submit_transaction():
         'traffic_quantity': traffic_quantity
     })
 
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     return success_response("Transaction submitted for review.", data={
@@ -572,7 +572,7 @@ async def bot_get_user_license():
     if not telegram_id:
         return error_response("Missing telegram_id", 400)
 
-    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
+    user = await asyncio.to_thread(central_panel_manager.db.get, 'users', where={'telegram_id': telegram_id})
     if not user:
         return error_response("User not registered with the bot. Please use /start to register.", 404)
     if not user.get('candy_client_name'):
@@ -581,12 +581,12 @@ async def bot_get_user_license():
     client_name = user['candy_client_name']
     
     # Try to find the client to get its server_id
-    client_record = await asyncio.to_thread(candy_panel.db.get, 'clients', where={'name': client_name})
+    client_record = await asyncio.to_thread(central_panel_manager.db.get, 'clients', where={'name': client_name})
     if not client_record or 'server_id' not in client_record:
         return error_response("Associated client or server information not found.", 500)
 
     server_id = client_record['server_id']
-    success, config_content = await asyncio.to_thread(candy_panel._get_client_config, client_name, server_id=server_id)
+    success, config_content = await asyncio.to_thread(central_panel_manager._get_client_config, client_name, server_id=server_id)
     if not success:
         return error_response(f"Failed to retrieve license. Reason: {config_content}. Please contact support.", 500)
 
@@ -599,7 +599,7 @@ async def bot_get_account_status():
     if not telegram_id:
         return error_response("Missing telegram_id", 400)
 
-    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
+    user = await asyncio.to_thread(central_panel_manager.db.get, 'users', where={'telegram_id': telegram_id})
     if not user:
         return error_response("User not registered with the bot. Please use /start to register.", 404)
 
@@ -617,12 +617,12 @@ async def bot_get_account_status():
     if user.get('candy_client_name'):
         client_name = user['candy_client_name']
         # Find the client's server_id first
-        client_record_central = await asyncio.to_thread(candy_panel.db.get, 'clients', where={'name': client_name})
+        client_record_central = await asyncio.to_thread(central_panel_manager.db.get, 'clients', where={'name': client_name})
 
         if client_record_central and 'server_id' in client_record_central:
             server_id = client_record_central['server_id']
             # Now call _get_client_by_name_and_public_key with server_id to get live data from agent
-            live_client_data = await asyncio.to_thread(candy_panel._get_client_by_name_and_public_key,
+            live_client_data = await asyncio.to_thread(central_panel_manager._get_client_by_name_and_public_key,
                                                         client_name,
                                                         client_record_central['public_key'], # Pass public key for lookup
                                                         server_id=server_id)
@@ -654,12 +654,12 @@ async def bot_call_support():
     if not all([telegram_id, message_text]):
         return error_response("Missing telegram_id or message", 400)
 
-    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': telegram_id})
+    user = await asyncio.to_thread(central_panel_manager.db.get, 'users', where={'telegram_id': telegram_id})
     username = f"User {telegram_id}"
     if user and user.get('candy_client_name'):
         username = user['candy_client_name']
 
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     if admin_telegram_id == '0':
@@ -679,7 +679,7 @@ async def bot_check_admin():
     if not telegram_id:
         return error_response("Missing telegram_id", 400)
     
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
     is_admin = (str(telegram_id) == admin_telegram_id)
     return success_response("Admin status checked.", data={"is_admin": is_admin, "admin_telegram_id": admin_telegram_id})
@@ -689,13 +689,13 @@ async def bot_check_admin():
 async def bot_admin_get_all_users():
     data = request.json
     telegram_id = data.get('telegram_id')
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     if not telegram_id or str(telegram_id) != admin_telegram_id:
         return error_response("Unauthorized", 403)
 
-    users = await asyncio.to_thread(candy_panel.db.select, 'users')
+    users = await asyncio.to_thread(central_panel_manager.db.select, 'users')
     return success_response("All bot users retrieved.", data={"users": users})
 
 @app.post("/bot_api/admin/get_transactions")
@@ -704,7 +704,7 @@ async def bot_admin_get_transactions():
     telegram_id = data.get('telegram_id')
     status_filter = data.get('status_filter', 'pending') # 'pending', 'approved', 'rejected', 'all'
 
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     if not telegram_id or str(telegram_id) != admin_telegram_id:
@@ -714,7 +714,7 @@ async def bot_admin_get_transactions():
     if status_filter != 'all':
         where_clause['status'] = status_filter
 
-    transactions = await asyncio.to_thread(candy_panel.db.select, 'transactions', where=where_clause)
+    transactions = await asyncio.to_thread(central_panel_manager.db.select, 'transactions', where=where_clause)
     return success_response("Transactions retrieved.", data={"transactions": transactions})
 
 @app.post("/bot_api/admin/approve_transaction")
@@ -727,13 +727,13 @@ async def bot_admin_approve_transaction():
     if not all([telegram_id, order_id]):
         return error_response("Missing required fields for approval.", 400)
     
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     if str(telegram_id) != admin_telegram_id:
         return error_response("Unauthorized", 403)
 
-    transaction = await asyncio.to_thread(candy_panel.db.get, 'transactions', where={'order_id': order_id})
+    transaction = await asyncio.to_thread(central_panel_manager.db.get, 'transactions', where={'order_id': order_id})
     if not transaction:
         return error_response("Transaction not found.", 404)
     if transaction['status'] != 'pending':
@@ -771,7 +771,7 @@ async def bot_admin_approve_transaction():
         return error_response("Invalid purchase_type in transaction record.", 500)
     
     # Get user from bot's DB
-    user_in_bot_db = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': transaction['telegram_id']})
+    user_in_bot_db = await asyncio.to_thread(central_panel_manager.db.get, 'users', where={'telegram_id': transaction['telegram_id']})
     if not user_in_bot_db:
         print(f"Warning: User {transaction['telegram_id']} not found in bot_db during transaction approval.")
         return error_response(f"User {transaction['telegram_id']} not found in bot's database. Cannot approve.", 404)
@@ -779,7 +779,7 @@ async def bot_admin_approve_transaction():
     client_name = user_in_bot_db.get('candy_client_name')
     
     # New: Choose a server for the client. For simplicity, pick the first active server available.
-    available_servers = await asyncio.to_thread(candy_panel.db.select, 'servers', where={'status': 'active'})
+    available_servers = await asyncio.to_thread(central_panel_manager.db.select, 'servers', where={'status': 'active'})
     if not available_servers:
         return error_response("No active servers available to create clients.", 500)
     
@@ -791,7 +791,7 @@ async def bot_admin_approve_transaction():
     candy_client_exists = False
     
     # Check if client exists in CandyPanel DB (on the target server)
-    existing_candy_client = await asyncio.to_thread(candy_panel.db.get, 'clients', where={'name': client_name, 'server_id': target_server_id})
+    existing_candy_client = await asyncio.to_thread(central_panel_manager.db.get, 'clients', where={'name': client_name, 'server_id': target_server_id})
     if existing_candy_client:
         candy_client_exists = True
         current_expires_str = existing_candy_client.get('expires')
@@ -801,7 +801,7 @@ async def bot_admin_approve_transaction():
     else:
         if not client_name:
              client_name = f"tguser_{transaction['telegram_id']}"
-             if await asyncio.to_thread(candy_panel.db.has, 'clients', {'name': client_name, 'server_id': target_server_id}):
+             if await asyncio.to_thread(central_panel_manager.db.has, 'clients', {'name': client_name, 'server_id': target_server_id}):
                  client_name = f"tguser_{transaction['telegram_id']}_{int(datetime.now().timestamp())}"
 
     new_expires_dt = datetime.now()
@@ -834,7 +834,7 @@ async def bot_admin_approve_transaction():
 
     if not candy_client_exists:
         success_cp, message_cp = await asyncio.to_thread(
-            candy_panel._new_client,
+            central_panel_manager._new_client,
             client_name,
             new_expires_iso,
             str(new_total_traffic_bytes_for_candy),
@@ -847,7 +847,7 @@ async def bot_admin_approve_transaction():
         client_config = message_cp
     else:
         success_cp, message_cp = await asyncio.to_thread(
-            candy_panel._edit_client,
+            central_panel_manager._edit_client,
             client_name,
             expires=new_expires_iso,
             traffic=str(new_total_traffic_bytes_for_candy),
@@ -857,7 +857,7 @@ async def bot_admin_approve_transaction():
         if not success_cp:
             return error_response(f"Failed to update client on server {target_server_name}: {message_cp}", 500)
         success_config, fetched_config = await asyncio.to_thread(
-            candy_panel._get_client_config, client_name, server_id=target_server_id
+            central_panel_manager._get_client_config, client_name, server_id=target_server_id
         )
         if success_config:
             client_config = fetched_config
@@ -872,9 +872,9 @@ async def bot_admin_approve_transaction():
     if user_in_bot_db.get('candy_client_name') != client_name:
         user_update_data['candy_client_name'] = client_name
     
-    await asyncio.to_thread(candy_panel.db.update, 'users', user_update_data, {'telegram_id': transaction['telegram_id']})
+    await asyncio.to_thread(central_panel_manager.db.update, 'users', user_update_data, {'telegram_id': transaction['telegram_id']})
 
-    await asyncio.to_thread(candy_panel.db.update, 'transactions', {
+    await asyncio.to_thread(central_panel_manager.db.update, 'transactions', {
         'status': 'approved',
         'approved_at': datetime.now().isoformat(),
         'admin_note': admin_note
@@ -896,21 +896,21 @@ async def bot_admin_reject_transaction():
     admin_note = data.get('admin_note', '')
 
     if not all([telegram_id, order_id]):
-        return error_response("Missing telegram_id or order_id.", 400)
+        return error_response("Missing required fields for rejection.", 400)
     
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     if str(telegram_id) != admin_telegram_id:
         return error_response("Unauthorized", 403)
 
-    transaction = await asyncio.to_thread(candy_panel.db.get, 'transactions', where={'order_id': order_id})
+    transaction = await asyncio.to_thread(central_panel_manager.db.get, 'transactions', where={'order_id': order_id})
     if not transaction:
         return error_response("Transaction not found.", 404)
     if transaction['status'] != 'pending':
         return error_response("Transaction is not pending. It has been already processed.", 400)
 
-    await asyncio.to_thread(candy_panel.db.update, 'transactions', {
+    await asyncio.to_thread(central_panel_manager.db.update, 'transactions', {
         'status': 'rejected',
         'approved_at': datetime.now().isoformat(),
         'admin_note': admin_note
@@ -931,20 +931,20 @@ async def bot_admin_manage_user():
     if not all([admin_telegram_id, target_telegram_id, action]):
         return error_response("Missing required fields.", 400)
     
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     if str(admin_telegram_id) != admin_telegram_id:
         return error_response("Unauthorized", 403)
 
-    user = await asyncio.to_thread(candy_panel.db.get, 'users', where={'telegram_id': target_telegram_id})
+    user = await asyncio.to_thread(central_panel_manager.db.get, 'users', where={'telegram_id': target_telegram_id})
     if not user:
         return error_response("Target user not found.", 404)
 
     client_name = user.get('candy_client_name')
     target_server_id = None
     if client_name:
-        client_record = await asyncio.to_thread(candy_panel.db.get, 'clients', where={'name': client_name})
+        client_record = await asyncio.to_thread(central_panel_manager.db.get, 'clients', where={'name': client_name})
         if client_record and 'server_id' in client_record:
             target_server_id = client_record['server_id']
 
@@ -957,7 +957,7 @@ async def bot_admin_manage_user():
         message = f"User {target_telegram_id} has been banned."
         if client_name and target_server_id is not None:
             success, msg = await asyncio.to_thread(
-                candy_panel._edit_client, client_name, status=False, server_id=target_server_id
+                central_panel_manager._edit_client, client_name, status=False, server_id=target_server_id
             )
             if not success:
                 message += f" (Failed to disable client on server {target_server_id}: {msg})"
@@ -967,7 +967,7 @@ async def bot_admin_manage_user():
         message = f"User {target_telegram_id} has been unbanned."
         if client_name and target_server_id is not None:
             success, msg = await asyncio.to_thread(
-                candy_panel._edit_client, client_name, status=True, server_id=target_server_id
+                central_panel_manager._edit_client, client_name, status=True, server_id=target_server_id
             )
             if not success:
                 message += f" (Failed to enable client on server {target_server_id}: {msg})"
@@ -980,7 +980,7 @@ async def bot_admin_manage_user():
             if client_name and target_server_id is not None:
                 traffic_bytes = int(new_traffic_gb * (1024**3))
                 success, msg = await asyncio.to_thread(
-                    candy_panel._edit_client, client_name, traffic=str(traffic_bytes), server_id=target_server_id
+                    central_panel_manager._edit_client, client_name, traffic=str(traffic_bytes), server_id=target_server_id
                 )
                 if not success:
                     message += f" (Failed to update traffic on server {target_server_id}: {msg})"
@@ -998,7 +998,7 @@ async def bot_admin_manage_user():
         return error_response("Invalid action or missing value.", 400)
 
     if update_data:
-        await asyncio.to_thread(candy_panel.db.update, 'users', update_data, {'telegram_id': target_telegram_id})
+        await asyncio.to_thread(central_panel_manager.db.update, 'users', update_data, {'telegram_id': target_telegram_id})
     
     if success_status:
         return success_response(message)
@@ -1015,13 +1015,13 @@ async def bot_admin_send_message_to_all():
     if not all([telegram_id, message_text]):
         return error_response("Missing telegram_id or message.", 400)
     
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     if str(telegram_id) != admin_telegram_id:
         return error_response("Unauthorized", 403)
 
-    all_users = await asyncio.to_thread(candy_panel.db.select, 'users')
+    all_users = await asyncio.to_thread(central_panel_manager.db.select, 'users')
     user_ids = [user['telegram_id'] for user in all_users]
 
     return success_response("Broadcast message prepared.", data={"target_user_ids": user_ids, "message": message_text})
@@ -1033,7 +1033,7 @@ async def bot_admin_data():
     It will iterate through all managed servers and fetch their data.
     """
     try:
-        all_servers = await asyncio.to_thread(candy_panel.get_all_servers)
+        all_servers = await asyncio.to_thread(central_panel_manager.get_all_servers)
         
         # Initialize aggregated dashboard stats (or pick one if only one server exists)
         dashboard_stats = {
@@ -1109,8 +1109,8 @@ async def bot_admin_data():
         dashboard_stats['alert'] = list(set(overall_alerts)) # Remove duplicates
 
         # For clients and interfaces, fetch all from central DB (which are linked to servers)
-        clients_data = await asyncio.to_thread(candy_panel.db.select, 'clients')
-        interfaces_data = await asyncio.to_thread(candy_panel.db.select, 'interfaces')
+        clients_data = await asyncio.to_thread(central_panel_manager.db.select, 'clients')
+        interfaces_data = await asyncio.to_thread(central_panel_manager.db.select, 'interfaces')
 
         for client in clients_data:
             try:
@@ -1119,7 +1119,7 @@ async def bot_admin_data():
                 client['used_trafic'] = {"download": 0, "upload": 0}
 
         # Central settings
-        settings_raw = await asyncio.to_thread(candy_panel.db.select, 'settings')
+        settings_raw = await asyncio.to_thread(central_panel_manager.db.select, 'settings')
         settings_data = {setting['key']: setting['value'] for setting in settings_raw}
 
 
@@ -1143,7 +1143,7 @@ async def bot_admin_server_control():
     if not all([admin_telegram_id, resource, action]):
         return error_response("Missing admin_telegram_id, resource, or action.", 400)
     
-    admin_telegram_id_setting = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
+    admin_telegram_id_setting = await asyncio.to_thread(central_panel_manager.db.get, 'settings', where={'key': 'telegram_bot_admin_id'})
     admin_telegram_id = admin_telegram_id_setting['value'] if admin_telegram_id_setting else '0'
 
     if str(admin_telegram_id) != admin_telegram_id:
@@ -1166,7 +1166,7 @@ async def bot_admin_server_control():
             wg_id = payload_data.get('wg_id', 0)
             note = payload_data.get('note', '')
             if all([name, expires, traffic]):
-                success, message = await asyncio.to_thread(candy_panel._new_client, name, expires, traffic, wg_id, note, server_id=target_server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._new_client, name, expires, traffic, wg_id, note, server_id=target_server_id)
                 if success:
                     candy_data = {"client_config": message}
         elif action == 'update':
@@ -1176,15 +1176,15 @@ async def bot_admin_server_control():
             status = payload_data.get('status')
             note = payload_data.get('note')
             if name:
-                success, message = await asyncio.to_thread(candy_panel._edit_client, name, expires, traffic, status, note, server_id=target_server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._edit_client, name, expires, traffic, status, note, server_id=target_server_id)
         elif action == 'delete':
             name = payload_data.get('name')
             if name:
-                success, message = await asyncio.to_thread(candy_panel._delete_client, name, server_id=target_server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._delete_client, name, server_id=target_server_id)
         elif action == 'get_config':
             name = payload_data.get('name')
             if name:
-                success, message = await asyncio.to_thread(candy_panel._get_client_config, name, server_id=target_server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._get_client_config, name, server_id=target_server_id)
                 if success:
                     candy_data = {"config": message}
     elif resource == 'interface':
@@ -1192,7 +1192,7 @@ async def bot_admin_server_control():
             address_range = payload_data.get('address_range')
             port = payload_data.get('port')
             if all([address_range, port]):
-                success, message = await asyncio.to_thread(candy_panel._new_interface_wg, address_range, port, server_id=target_server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._new_interface_wg, address_range, port, server_id=target_server_id)
                 if success: # message here is json string
                      interface_details = json.loads(message)
                      candy_data = {"wg_id": interface_details["wg_id"], "private_key": interface_details["private_key"], "public_key": interface_details["public_key"]}
@@ -1203,21 +1203,21 @@ async def bot_admin_server_control():
             port = payload_data.get('port')
             status = payload_data.get('status')
             if name:
-                success, message = await asyncio.to_thread(candy_panel._edit_interface, name, address, port, status, server_id=target_server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._edit_interface, name, address, port, status, server_id=target_server_id)
         elif action == 'delete':
             wg_id = payload_data.get('wg_id')
             if wg_id is not None:
-                success, message = await asyncio.to_thread(candy_panel._delete_interface, wg_id, server_id=target_server_id)
+                success, message = await asyncio.to_thread(central_panel_manager._delete_interface, wg_id, server_id=target_server_id)
     elif resource == 'setting':
         # These are central panel settings, not server-specific settings via agent
         if action == 'update':
             key = payload_data.get('key')
             value = payload_data.get('value')
             if all([key, value is not None]):
-                success, message = await asyncio.to_thread(candy_panel._change_settings, key, value)
+                success, message = await asyncio.to_thread(central_panel_manager._change_settings, key, value)
     elif resource == 'sync':
         if action == 'trigger':
-            await asyncio.to_thread(candy_panel._sync, server_id=target_server_id)
+            await asyncio.to_thread(central_panel_manager._sync, server_id=target_server_id)
             success = True
             message = "Synchronization process initiated successfully."
     elif resource == 'server': # New resource for managing servers via bot (admin only)
@@ -1228,13 +1228,13 @@ async def bot_admin_server_control():
             api_key = payload_data.get('api_key')
             description = payload_data.get('description', '')
             if all([name, ip_address, agent_port, api_key]):
-                success, message, server_id = await asyncio.to_thread(candy_panel.add_server, name, ip_address, int(agent_port), api_key, description)
+                success, message, server_id = await asyncio.to_thread(central_panel_manager.add_server, name, ip_address, int(agent_port), api_key, description)
                 if success:
                     candy_data = {"server_id": server_id}
         elif action == 'update':
             server_id_to_update = payload_data.get('server_id')
             if server_id_to_update is not None:
-                success, message = await asyncio.to_thread(candy_panel.update_server,
+                success, message = await asyncio.to_thread(central_panel_manager.update_server,
                                                             server_id_to_update,
                                                             name=payload_data.get('name'),
                                                             ip_address=payload_data.get('ip_address'),
@@ -1245,9 +1245,9 @@ async def bot_admin_server_control():
         elif action == 'delete':
             server_id_to_delete = payload_data.get('server_id')
             if server_id_to_delete is not None:
-                success, message = await asyncio.to_thread(candy_panel.delete_server, server_id_to_delete)
+                success, message = await asyncio.to_thread(central_panel_manager.delete_server, server_id_to_delete)
         elif action == 'get_all':
-            servers = await asyncio.to_thread(candy_panel.get_all_servers)
+            servers = await asyncio.to_thread(central_panel_manager.get_all_servers)
             for s in servers:
                 s.pop('api_key', None) # Don't expose API keys
                 if 'dashboard_cache' in s and isinstance(s['dashboard_cache'], str):
