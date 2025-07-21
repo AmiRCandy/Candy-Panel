@@ -68,7 +68,7 @@ class SQLite:
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `clients` (
                     `name` TEXT NOT NULL,
-                    `server_id` INTEGER NOT NULL,
+                    `server_id` INTEGER NOT NULL DEFAULT 1,
                     `wg` INTEGER NOT NULL,
                     `public_key` TEXT NOT NULL UNIQUE,
                     `private_key` TEXT NOT NULL,

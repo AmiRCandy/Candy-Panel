@@ -734,6 +734,7 @@ PersistentKeepalive = 25
             # Store in agent's local DB (without server_id)
             self.db.insert('clients', {
                 'name': name,
+                'server_id': 1,
                 'public_key': client_public,
                 'private_key': client_private,
                 'address': client_ip,
