@@ -1,8 +1,8 @@
 # 🍭 Candy Panel - WireGuard Management System
 
-A modern, beautiful web interface for managing WireGuard VPN servers with comprehensive backend integration. Built with React, TypeScript, and a powerful Python FastAPI backend.
+A modern, beautiful web interface for managing WireGuard VPN servers with comprehensive backend integration. Built with React, TypeScript, and a powerful Python Flask backend.
 
-![Candy Panel Dashboard](https://via.placeholder.com/800x400/0a0a0a/ffffff?text=Candy+Panel+Dashboard)
+![Candy Panel Dashboard](https://github.com/AmiRCandy/Candy-Panel/blob/15d1fa6852bb187ccbfcc5712c481cc3d00235cc/image.png)
 
 ## ✨ Features
 
@@ -22,17 +22,10 @@ A modern, beautiful web interface for managing WireGuard VPN servers with compre
 ### 🚀 One line command install
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Panel/dev.test/setup.sh)"
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Panel/main/setup.sh)"
 ```
 - Panel Default Port : 3446
 - API Default Port : 3446
-
-### 🚀 Remote server install command
-
-```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Panel/dev.test/remote_setup.sh)"
-```
-- Agent Default Port : 1212
 
 ### Prerequisites
 
@@ -187,6 +180,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] Theme customization
 
 ---
+## Credits
+
+Thanks to [@Byte-Aura](https://github.com/Byte-Aura) for help with planning and testing.
+
+
 
 <div align="center">
   <p>Built with 💜 for WireGuard Enthusiasts</p>

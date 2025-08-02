@@ -1,6 +1,8 @@
 # db.py
 import sqlite3
-import os
+import time
+import json , os
+from datetime import datetime
 
 class SQLite:
     def __init__(self, db_path='CandyPanel.db'):
@@ -35,57 +37,31 @@ class SQLite:
         """
         try:
             self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS `servers` (
-                    `server_id` INTEGER PRIMARY KEY AUTOINCREMENT,
-                    `name` TEXT NOT NULL UNIQUE,
-                    `ip_address` TEXT NOT NULL,
-                    `agent_port` INTEGER NOT NULL,
-                    `api_key` TEXT NOT NULL, 
-                    `status` TEXT DEFAULT 'active', -- e.g., 'active', 'inactive', 'unreachable'
-                    `last_synced` TEXT,
-                    `description` TEXT DEFAULT '',
-                    `dashboard_cache` TEXT DEFAULT '{}' 
-                );
-            """)
-            self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `interfaces` (
-                    `wg` INTEGER,
-                    `server_id` INTEGER NOT NULL,
+                    `wg` INTEGER PRIMARY KEY,
                     `private_key` TEXT NOT NULL,
                     `public_key` TEXT NOT NULL,
-                    `port` INTEGER NOT NULL,
-                    `address_range` TEXT NOT NULL,
-                    `status` BOOLEAN DEFAULT 1,
-                    PRIMARY KEY (`wg`, `server_id`),
-                    UNIQUE(`server_id`, `port`),
-                    UNIQUE(`server_id`, `address_range`),
-                    FOREIGN KEY (`server_id`) REFERENCES `servers`(`server_id`) ON DELETE CASCADE
+                    `port` INTEGER NOT NULL UNIQUE,
+                    `address_range` TEXT NOT NULL UNIQUE,
+                    `status` BOOLEAN DEFAULT 1
                 );
             """)
-
-
-            # Modified: clients table to include server_id
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `clients` (
-                    `name` TEXT NOT NULL,
-                    `server_id` INTEGER NOT NULL DEFAULT 1,
+                    `name` TEXT NOT NULL UNIQUE, 
                     `wg` INTEGER NOT NULL,
-                    `public_key` TEXT NOT NULL UNIQUE,
+                    `public_key` TEXT NOT NULL UNIQUE, 
                     `private_key` TEXT NOT NULL,
-                    `address` TEXT NOT NULL,
+                    `address` TEXT NOT NULL UNIQUE, 
                     `created_at` TEXT NOT NULL,
                     `expires` TEXT NOT NULL,
                     `note` TEXT DEFAULT '',
-                    `traffic` TEXT NOT NULL,
+                    `traffic` TEXT NOT NULL, 
                     `used_trafic` TEXT NOT NULL DEFAULT '{"download":0,"upload":0, "last_wg_rx":0, "last_wg_tx":0}',
                     `connected_now` BOOLEAN NOT NULL DEFAULT 0,
-                    `status` BOOLEAN NOT NULL DEFAULT 1,
-                    PRIMARY KEY (`name`),
-                    FOREIGN KEY (`server_id`) REFERENCES `servers`(`server_id`) ON DELETE CASCADE,
-                    FOREIGN KEY (`server_id`, `wg`) REFERENCES `interfaces`(`server_id`, `wg`) 
+                    `status` BOOLEAN NOT NULL DEFAULT 1
                 );
             """)
-
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `settings` (
                     `key` TEXT PRIMARY KEY,
@@ -93,30 +69,31 @@ class SQLite:
                 );
             """)
             # --- Telegram Bot Tables ---
+            # MODIFICATION HERE: Add 'language' column
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `users` (
                     `telegram_id` INTEGER PRIMARY KEY,
-                    `candy_client_name` TEXT UNIQUE,
+                    `candy_client_name` TEXT UNIQUE, 
                     `traffic_bought_gb` REAL DEFAULT 0,
                     `time_bought_days` INTEGER DEFAULT 0,
                     `status` TEXT DEFAULT 'active',
                     `is_admin` BOOLEAN DEFAULT 0,
                     `created_at` TEXT NOT NULL,
-                    `language` TEXT DEFAULT 'en'
+                    `language` TEXT DEFAULT 'en' -- New language column with default 'en'
                 );
             """)
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `transactions` (
                     `order_id` TEXT PRIMARY KEY,
                     `telegram_id` INTEGER NOT NULL,
-                    `amount` REAL NOT NULL,
+                    `amount` REAL NOT NULL, 
                     `card_number_sent` TEXT,
-                    `status` TEXT DEFAULT 'pending',
+                    `status` TEXT DEFAULT 'pending', 
                     `requested_at` TEXT NOT NULL,
                     `approved_at` TEXT,
                     `admin_note` TEXT,
-                    `purchase_type` TEXT,
-                    `quantity` REAL,
+                    `purchase_type` TEXT, 
+                    `quantity` REAL, 
                     `time_quantity` REAL DEFAULT 0,
                     `traffic_quantity` REAL DEFAULT 0,
                     FOREIGN KEY (`telegram_id`) REFERENCES `users`(`telegram_id`)
@@ -144,16 +121,16 @@ class SQLite:
             {'key': 'status', 'value': '1'},
             {'key': 'alert', 'value': '["Welcome To Candy Panel - by AmiRCandy"]'},
             {'key': 'reset_time', 'value': '0'},
-            {'key': 'mtu', 'value': '1420'},
+            {'key': 'mtu', 'value': '1420'}, 
             {'key': 'bandwidth', 'value': '0'},
             {'key': 'uptime', 'value': '0'},
             {'key': 'telegram_bot_status', 'value': '0'},
             {'key': 'telegram_bot_admin_id', 'value': '0'},
-            {'key': 'telegram_bot_token', 'value': 'YOUR_TELEGRAM_BOT_TOKEN'},
-            {'key': 'telegram_api_hash', 'value': 'YOUR_TELEGRAM_API_HASH'},
-            {'key': 'telegram_api_id', 'value': 'YOUR_TELEGRAM_API_ID'},
-            {'key': 'admin_card_number', 'value': 'YOUR_ADMIN_CARD_NUMBER'},
-            {'key': 'prices', 'value': '{"1GB": 4000, "1Month": 75000}'},
+            {'key': 'telegram_bot_token', 'value': 'YOUR_TELEGRAM_BOT_TOKEN'}, 
+            {'key': 'telegram_api_hash', 'value': 'YOUR_TELEGRAM_API_HASH'}, 
+            {'key': 'telegram_api_id', 'value': 'YOUR_TELEGRAM_API_ID'}, 
+            {'key': 'admin_card_number', 'value': 'YOUR_ADMIN_CARD_NUMBER'}, 
+            {'key': 'prices', 'value': '{"1GB": 4000, "1Month": 75000}'}, 
             {'key': 'api_tokens', 'value': '{}'},
             {'key': 'auto_backup', 'value': '1'},
             {'key': 'install', 'value': '0'},
@@ -183,7 +160,7 @@ class SQLite:
                 return self.cursor.rowcount
         except sqlite3.Error as e:
             print(f"Database query failed: {e}\nQuery: {query}\nParams: {params}")
-            raise
+            raise 
 
     def select(self, table: str, columns: str | list[str] = '*', where: dict = None) -> list[dict]:
         """
