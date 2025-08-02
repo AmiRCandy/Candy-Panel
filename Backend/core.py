@@ -941,11 +941,13 @@ PersistentKeepalive = 25
         if not client:
             return None
 
-        # Parse used_trafic JSON string into a dict
+        # Parse used_trafic JSON string into a dict, handling potential errors
         try:
-            client['used_trafic'] = json.loads(client['used_trafic'])
+            used_traffic_raw = client.get('used_trafic', '{"download":0,"upload":0}')
+            client['used_trafic'] = json.loads(used_traffic_raw)
         except (json.JSONDecodeError, TypeError):
-            client['used_trafic'] = {"download": 0, "upload": 0} # Default if parsing fails
+            print(f"[!] Warning: Invalid JSON in used_trafic for client '{name}'. Resetting to defaults.")
+            client['used_trafic'] = {"download": 0, "upload": 0}
 
         # Remove sensitive data like private_key for public view
         client.pop('private_key', None)
