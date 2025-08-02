@@ -1014,13 +1014,15 @@ function App() {
                           >
                             <Download className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => shortLink(client.name,client.public_key)}
-                            className="p-2 text-blue-400 hover:bg-blue-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
-                            title="ShortLink"
-                          >
-                            <Link2 className="w-4 h-4" />
-                          </button>
+                          {client.public_key && (
+                            <button
+                                onClick={() => shortLink(client.name, client.public_key)}
+                                className="p-2 text-blue-400 hover:bg-blue-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"
+                                title="ShortLink"
+                            >
+                                <Link2 className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => editClient(client)}
                             className="p-2 text-gray-400 hover:bg-gray-600/20 rounded-lg transition-all duration-200 transform hover:scale-110"

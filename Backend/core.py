@@ -185,7 +185,7 @@ AllowedIPs = {client_ip}/32
         except Exception as e:
             raise CommandExecutionError(f"Failed to add client '{client_name}' to WireGuard configuration: {e}")
 
-    def _remove_peer_from_config(self, wg_id: int, client_name: str):
+    def _remove_peer_from_config(self, wg_id: int, client_name: str, client_public_key: str):
         """
         Removes a client peer entry from the WireGuard configuration file.
         """
@@ -216,7 +216,8 @@ AllowedIPs = {client_ip}/32
                     peer_block_to_delete = False # Reset for new block
                 elif in_peer_block:
                     temp_block.append(line)
-                    if f"# {client_name}" in line.strip(): # Check for client name in comment
+                    # Check for public key to identify the peer block, more reliable than comment
+                    if f"PublicKey = {client_public_key}" in line.strip():
                         peer_block_to_delete = True
                     # An empty line or a new [Peer] indicates the end of the current peer block
                     if not line.strip() and in_peer_block:
@@ -348,7 +349,6 @@ AllowedIPs = {client_ip}/32
         interface_name = f"wg{wg_id}"
         server_private_key_path = SERVER_PRIVATE_KEY_PATH.replace('X', str(wg_id))
         server_public_key_path = SERVER_PUBLIC_KEY_PATH.replace('X', str(wg_id))
-        wg_conf_path = WG_CONF_PATH.replace('X', str(wg_id))
 
         private_key, public_key = "", ""
         if not os.path.exists(server_private_key_path):
@@ -365,6 +365,7 @@ AllowedIPs = {client_ip}/32
             with open(server_public_key_path) as f:
                 public_key = f.read().strip()
 
+        wg_conf_path = WG_CONF_PATH.replace('X', str(wg_id))
         wg_conf = f"""
 [Interface]
 Address = {wg_address_range}
@@ -550,9 +551,10 @@ PersistentKeepalive = 25
             return False, f"Client '{client_name}' not found."
 
         wg_id = client['wg']
+        client_public_key = client['public_key']
 
         try:
-            self._remove_peer_from_config(wg_id, client_name)
+            self._remove_peer_from_config(wg_id, client_name, client_public_key)
         except CommandExecutionError as e:
             print(f"[!] Error during peer removal from config for disabling: {e}. Proceeding with DB status update.")
             # Decide if you want to abort here or proceed with DB status update
@@ -574,8 +576,9 @@ PersistentKeepalive = 25
             return False, f"Client '{client_name}' not found."
 
         wg_id = client['wg']
+        client_public_key = client['public_key']
         try:
-            self._remove_peer_from_config(wg_id, client['name']) # Use client['name']
+            self._remove_peer_from_config(wg_id, client['name'], client_public_key) # Use client['name']
         except CommandExecutionError as e:
             print(f"[!] Error during peer removal from config during deletion: {e}. Proceeding with DB deletion.")
             # Decide if you want to abort here or proceed with DB deletion
@@ -597,6 +600,7 @@ PersistentKeepalive = 25
             return False, f"Client '{name}' not found."
 
         update_data = {}
+        client_public_key = current_client['public_key']
 
         if expire is not None:
             update_data['expires'] = expire
@@ -612,12 +616,12 @@ PersistentKeepalive = 25
 
             if status: # Changing to Active
                 try:
-                    self._add_peer_to_config(wg_id, name, current_client['public_key'], current_client['address'])
+                    self._add_peer_to_config(wg_id, name, client_public_key, current_client['address'])
                 except CommandExecutionError as e:
                     return False, str(e)
             else: # Changing to Inactive
                 try:
-                    self._remove_peer_from_config(wg_id, name)
+                    self._remove_peer_from_config(wg_id, name, client_public_key)
                 except CommandExecutionError as e:
                     return False, str(e)
 
@@ -874,7 +878,6 @@ PersistentKeepalive = 25
                     current_tokens = json.loads(settings_entry['value'])
                 except json.JSONDecodeError:
                     print(f"Warning: 'api_tokens' setting contains invalid JSON. Resetting.")
-
             current_tokens[name] = token
             self.db.update('settings', {'value': json.dumps(current_tokens)}, {'key': 'api_tokens'})
             return True, f"API token '{name}' added/updated successfully."
