@@ -948,9 +948,6 @@ PersistentKeepalive = 25
             print(f"[!] Warning: Invalid JSON in used_trafic for client '{name}'. Resetting to defaults.")
             client['used_trafic'] = {"download": 0, "upload": 0}
 
-        # Remove sensitive data like private_key for public view
-        client.pop('private_key', None)
-        # You might also want to remove 'wg' if it exposes internal structure
         client.pop('wg', None)
 
         # Fetch relevant interface details
