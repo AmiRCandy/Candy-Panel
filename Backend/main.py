@@ -101,7 +101,7 @@ PersistentKeepalive = 25"""
     # Use qrencode to generate the QR code as a temporary file
     temp_file_path = f"/tmp/{name}-{public_key}.png"
     try:
-        subprocess.run(['qrencode', '-o', temp_file_path, config_content], check=True)
+        await asyncio.to_thread(subprocess.run,['qrencode', '-o', temp_file_path, config_content], check=True)
         return send_file(temp_file_path, mimetype='image/png')
     except subprocess.CalledProcessError:
         return error_response("Failed to generate QR code. Is 'qrencode' installed?", 500)
