@@ -366,9 +366,6 @@ async def manage_resources():
 
     except CommandExecutionError as e:
         return error_response(f"Command execution error: {e}", 500)
-    except Exception as e:
-        return error_response(f"An unexpected error occurred: {e}", 500)
-
 # --- Telegram Bot API Endpoints (Integrated) ---
 
 @app.post("/bot_api/user/register")

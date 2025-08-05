@@ -595,7 +595,7 @@ PersistentKeepalive = 25
         Edits an existing client's details in the database and updates WireGuard config if status changes.
         Allows partial updates by checking for None values.
         """
-        current_client = self.db.get('clients', '*',{'name': name})
+        current_client = self.db.get('clients', where={'name': name})
         if not current_client:
             return False, f"Client '{name}' not found."
 
