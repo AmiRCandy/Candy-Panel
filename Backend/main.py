@@ -84,7 +84,8 @@ async def get_qr_code(name: str, public_key: str):
     dns_value = dns['value'] if dns else '8.8.8.8'
     mtu = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'mtu'})
     mtu_value = mtu['value'] if mtu else '1420'
-    server_ip = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'custom_endpont'})['value']
+    server_ip = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'custom_endpont'})
+    server_ip = server_ip['value']
 
     config_content = f"""[Interface]
 PrivateKey = {client['private_key']}
