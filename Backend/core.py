@@ -419,7 +419,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         current_dir = os.path.abspath(os.path.dirname(__file__))
         cron_script_path = os.path.join(current_dir, 'cron.py')
         backend_dir = os.path.dirname(cron_script_path)
-        cron_line = f"*/5 * * * * cd {backend_dir} && source venv/bin/activate && python3 {cron_script_path} >> /var/log/candy-sync.log 2>&1"
+        cron_line = f"*/5 * * * * {backend_dir}/venv/bin/python3 {backend_dir}/{cron_script_path} >> /var/log/candy-sync.log 2>&1"
         self.run_command(f'(crontab -l 2>/dev/null; echo "{cron_line}") | crontab -')
         return True, 'Installed successfully!'
 
@@ -429,7 +429,6 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         WARNING: Password stored in plaintext in DB. This should be hashed!
         """
         admin_settings = json.loads(self.db.get('settings', where={'key': 'admin'})['value'])
-        # In a real app, compare hashed passwords here
         if admin_settings.get('user') == user and admin_settings.get('password') == password:
             session_token = str(uuid.uuid4())
             self.db.update('settings', {'value': session_token}, {'key': 'session_token'})
