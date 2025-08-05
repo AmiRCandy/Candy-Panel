@@ -546,7 +546,7 @@ PersistentKeepalive = 25
         """
         Disables a WireGuard client by setting its status to False and removing from config.
         """
-        client = self.db.get('clients', {'name': client_name})
+        client = self.db.get('clients', where={'name': client_name})
         if not client:
             return False, f"Client '{client_name}' not found."
 
@@ -571,7 +571,7 @@ PersistentKeepalive = 25
         Deletes a WireGuard client completely (DB and config).
         This should be a more manual, admin-triggered action, not automated by cron.
         """
-        client = self.db.get('clients', {'name': client_name})
+        client = self.db.get('clients', where={'name': client_name})
         if not client:
             return False, f"Client '{client_name}' not found."
 
@@ -595,7 +595,7 @@ PersistentKeepalive = 25
         Edits an existing client's details in the database and updates WireGuard config if status changes.
         Allows partial updates by checking for None values.
         """
-        current_client = self.db.get('clients', {'name': name})
+        current_client = self.db.get('clients', '*',{'name': name})
         if not current_client:
             return False, f"Client '{name}' not found."
 
@@ -711,7 +711,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         Handles starting/stopping the interface based on status change.
         """
         wg_id = int(name.replace('wg', ''))
-        current_interface = self.db.get('interfaces', {'wg': wg_id})
+        current_interface = self.db.get('interfaces', where={'wg': wg_id})
         if not current_interface:
             return False, f"Interface {name} does not exist in database."
 
@@ -781,7 +781,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         and deletes associated clients and the interface from the database.
         """
         interface_name = f"wg{wg_id}"
-        interface = self.db.get('interfaces', {'wg': wg_id})
+        interface = self.db.get('interfaces', where={'wg': wg_id})
         if not interface:
             return False, f"Interface {interface_name} not found."
 
