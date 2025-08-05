@@ -97,10 +97,8 @@ function ClientDetailsPage() { // Renamed from App to ClientDetailsPage
     setIsDownloading(true);
     try {
       // Reconstruct the config using live data
-      const config = `# WARNING: This configuration does not contain your private key for security.
-# For the full config, please ask your administrator.
-[Interface]
-PrivateKey = <YOUR_CLIENT_PRIVATE_KEY_HERE>
+      const config = `[Interface]
+PrivateKey = ${clientData.private_key}
 Address = ${clientData.address}/32
 DNS = ${clientData.server_dns}
 MTU = ${clientData.server_mtu}
