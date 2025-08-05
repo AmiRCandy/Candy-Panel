@@ -87,7 +87,7 @@ async def get_qr_code(name: str, public_key: str):
     server_ip = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'custom_endpont'})['value']
 
     config_content = f"""[Interface]
-PrivateKey = <YOUR_CLIENT_PRIVATE_KEY_HERE>
+PrivateKey = {client['private_key']}
 Address = {client['address']}/32
 DNS = {dns_value}
 MTU = {mtu_value}
@@ -105,6 +105,8 @@ PersistentKeepalive = 25"""
         return send_file(temp_file_path, mimetype='image/png')
     except subprocess.CalledProcessError:
         return error_response("Failed to generate QR code. Is 'qrencode' installed?", 500)
+    except Exception as e:
+        return error_response(f"An error occurred: {e}", 500)
     finally:
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
@@ -366,6 +368,9 @@ async def manage_resources():
 
     except CommandExecutionError as e:
         return error_response(f"Command execution error: {e}", 500)
+    except Exception as e:
+        return error_response(f"An unexpected error occurred: {e}", 500)
+
 # --- Telegram Bot API Endpoints (Integrated) ---
 
 @app.post("/bot_api/user/register")
