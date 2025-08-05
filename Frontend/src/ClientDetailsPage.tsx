@@ -97,8 +97,10 @@ function ClientDetailsPage() { // Renamed from App to ClientDetailsPage
     setIsDownloading(true);
     try {
       // Reconstruct the config using live data
-      const config = `[Interface]
-PrivateKey = <YOUR_CLIENT_PRIVATE_KEY_HERE> # This should not be publicly exposed, user needs to generate
+      const config = `# WARNING: This configuration does not contain your private key for security.
+# For the full config, please ask your administrator.
+[Interface]
+PrivateKey = <YOUR_CLIENT_PRIVATE_KEY_HERE>
 Address = ${clientData.address}/32
 DNS = ${clientData.server_dns}
 MTU = ${clientData.server_mtu}
@@ -346,15 +348,16 @@ PersistentKeepalive = 25`;
         {showQR && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
             <div className="bg-gray-800 rounded-2xl p-6 max-w-sm w-full border border-gray-700">
-              <h3 className="text-lg font-semibold text-white mb-4 text-center">QR Code (Placeholder)</h3>
-              <div className="bg-white rounded-xl p-4 mb-4">
-                <div className="aspect-square bg-gray-900 rounded-lg flex items-center justify-center">
-                  {/* You would generate a QR code for the config string here */}
-                  <QrCode className="w-32 h-32 text-white" />
-                </div>
+              <h3 className="text-lg font-semibold text-white mb-4 text-center">QR Code</h3>
+              <div className="bg-white rounded-xl p-4 mb-4 flex justify-center items-center">
+                <img
+                    src={`/qr/${clientname}/${clientpubkey}`}
+                    alt="QR Code"
+                    className="max-w-full h-auto"
+                />
               </div>
               <p className="text-gray-400 text-sm text-center mb-4">
-                This QR code is a placeholder
+                Scan this code with the WireGuard app to import the configuration.
               </p>
               <button
                 onClick={() => setShowQR(false)}

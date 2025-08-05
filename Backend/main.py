@@ -5,6 +5,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 import os
+import subprocess
 
 # Import your CandyPanel logic
 from core import CandyPanel, CommandExecutionError
@@ -64,6 +65,53 @@ async def get_client_public_details(name: str, public_key: str):
             return error_response("Client not found or public key mismatch.", 404)
     except Exception as e:
         return error_response(f"An error occurred: {e}", 500)
+@app.get("/qr/<name>/<public_key>")
+async def get_qr_code(name: str, public_key: str):
+    """
+    Generates and returns a QR code image for a client's configuration (without the private key).
+    This endpoint is publicly accessible.
+    """
+    client = await asyncio.to_thread(candy_panel.db.get, 'clients', where={'name': name, 'public_key': public_key})
+    if not client:
+        return error_response("Client not found or public key mismatch.", 404)
+
+    interface = await asyncio.to_thread(candy_panel.db.get, 'interfaces', where={'wg': client['wg']})
+    if not interface:
+        return error_response("Associated WireGuard interface not found.", 500)
+
+    # Reconstruct the config without the private key for the QR code
+    dns = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'dns'})
+    dns_value = dns['value'] if dns else '8.8.8.8'
+    mtu = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'mtu'})
+    mtu_value = mtu['value'] if mtu else '1420'
+    server_ip = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'custom_endpont'})
+    server_ip = server_ip['value']
+
+    config_content = f"""[Interface]
+PrivateKey = {client['private_key']}
+Address = {client['address']}/32
+DNS = {dns_value}
+MTU = {mtu_value}
+
+[Peer]
+PublicKey = {interface['public_key']}
+Endpoint = {server_ip}:{interface['port']}
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25"""
+    
+    # Use qrencode to generate the QR code as a temporary file
+    temp_file_path = f"/tmp/{name}-{public_key}.png"
+    try:
+        await asyncio.to_thread(subprocess.run,['qrencode', '-o', temp_file_path, config_content], check=True)
+        return send_file(temp_file_path, mimetype='image/png')
+    except subprocess.CalledProcessError:
+        return error_response("Failed to generate QR code. Is 'qrencode' installed?", 500)
+    except Exception as e:
+        return error_response(f"An error occurred: {e}", 500)
+    finally:
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
 @app.get("/check")
 async def check_installation():
     """
