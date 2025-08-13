@@ -439,7 +439,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         self.db.update('settings', {'value': server_ip}, {'key': 'custom_endpont'})
         self.db.update('settings', {'value': wg_dns}, {'key': 'dns'})
         if wg_ipv6_dns:
-            self.db.insert('settings', {'key': 'ipv6_dns', 'value': wg_ipv6_dns})
+            self.db.update('settings',  {'value': wg_ipv6_dns},{'key': 'ipv6_dns'})
         # IMPORTANT: In a real app, hash the admin password before storing!
         admin_data = json.dumps({'user': admin_user, 'password': admin_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
