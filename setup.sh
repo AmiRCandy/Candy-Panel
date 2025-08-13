@@ -201,7 +201,7 @@ clone_or_update_repo() {
         print_warning "Project directory '$PROJECT_ROOT' already exists."
         confirm_action "Do you want to pull the latest changes from the repository?"
         print_info "Navigating to $PROJECT_ROOT and pulling latest changes..."
-        sudo git -C "$PROJECT_ROOT" pull origin main || sudo git -C "$PROJECT_ROOT" pull origin main
+        sudo git -C "$PROJECT_ROOT" pull origin dev.test || sudo git -C "$PROJECT_ROOT" pull origin dev.test
         if [ $? -ne 0 ]; then
             print_error "Failed to pull latest changes from repository. Check permissions or network."
             exit 1
@@ -211,7 +211,7 @@ clone_or_update_repo() {
         print_info "Cloning repository '$REPO_URL' into '$PROJECT_ROOT'..."
         sudo mkdir -p "$(dirname "$PROJECT_ROOT")"
 
-        sudo git clone --branch main --single-branch "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
+        sudo git clone --branch dev.test --single-branch "$REPO_URL" "$PROJECT_ROOT" || { print_error "Failed to clone repository"; exit 1; }
         sudo chown -R "$LINUX_USER:$LINUX_USER" "$PROJECT_ROOT" || { print_warning "Could not change ownership of $PROJECT_ROOT to $LINUX_USER. Manual intervention might be needed for permissions."; }
         print_success "Repository cloned successfully."
     fi
