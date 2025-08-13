@@ -4,6 +4,7 @@ export interface Client {
   public_key: string;
   private_key?: string;
   address: string;
+  ipv6_address?: string;
   created_at: string;
   expires: string;
   note: string;
@@ -27,6 +28,7 @@ export interface Interface {
   public_key: string;
   port: number;
   address_range: string;
+  ipv6_address_range?: string;
   status: boolean;
 }
 

@@ -1,3 +1,4 @@
+// Frontend/src/App.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Server,
@@ -84,7 +85,9 @@ function App() {
   const [serverIp, setServerIp] = useState('');
   const [wgPort, setWgPort] = useState('51820');
   const [wgAddressRange, setWgAddressRange] = useState('10.0.0.1/24');
+  const [wgIpv6Address, setWgIpv6Address] = useState('');
   const [wgDns, setWgDns] = useState('8.8.8.8');
+  const [wgIpv6Dns, setWgIpv6Dns] = useState('2001:4860:4860::8888');
   const [adminUser, setAdminUser] = useState('admin');
   const [adminPassword, setAdminPassword] = useState('admin');
 
@@ -101,6 +104,7 @@ function App() {
   // Interface form states
   const [showInterfaceForm, setShowInterfaceForm] = useState(false);
   const [interfaceAddressRange, setInterfaceAddressRange] = useState('');
+  const [interfaceIpv6AddressRange, setInterfaceIpv6AddressRange] = useState('');
   const [interfacePort, setInterfacePort] = useState('');
   const [showEditInterfaceForm, setShowEditInterfaceForm] = useState(false); // New state for editing interface
   const [editingInterface, setEditingInterface] = useState<Interface | null>(null);
@@ -225,7 +229,9 @@ function App() {
         server_ip: serverIp,
         wg_port: wgPort,
         wg_address_range: wgAddressRange,
+        wg_ipv6_address: wgIpv6Address,
         wg_dns: wgDns,
+        wg_ipv6_dns: wgIpv6Dns,
         admin_user: adminUser,
         admin_password: adminPassword,
       });
@@ -285,12 +291,14 @@ function App() {
       setLoading(true);
       const response = await apiClient.createInterface({
         address_range: interfaceAddressRange,
+        ipv6_address_range: interfaceIpv6AddressRange,
         port: parseInt(interfacePort),
       });
       if (response.success) {
         showMessage('Interface created successfully!');
         setShowInterfaceForm(false);
         setInterfaceAddressRange('');
+        setInterfaceIpv6AddressRange('');
         setInterfacePort('');
         await loadData();
       }
@@ -527,7 +535,7 @@ function App() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Address Range</label>
+                <label className="block text-sm font-medium text-gray-300 mb-1">IPv4 Address Range</label>
                 <input
                   type="text"
                   value={wgAddressRange}
@@ -538,7 +546,7 @@ function App() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">DNS Server</label>
+                <label className="block text-sm font-medium text-gray-300 mb-1">IPv4 DNS Server</label>
                 <input
                   type="text"
                   value={wgDns}
@@ -546,6 +554,29 @@ function App() {
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                   placeholder="8.8.8.8"
                   required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">IPv6 Address Range (Optional)</label>
+                <input
+                  type="text"
+                  value={wgIpv6Address}
+                  onChange={(e) => setWgIpv6Address(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                  placeholder="fd86:ea04:1115::1/64"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">IPv6 DNS Server (Optional)</label>
+                <input
+                  type="text"
+                  value={wgIpv6Dns}
+                  onChange={(e) => setWgIpv6Dns(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                  placeholder="2001:4860:4860::8888"
                 />
               </div>
             </div>
@@ -813,6 +844,9 @@ function App() {
                       <div>
                         <p className="font-medium text-white">{client.name}</p>
                         <p className="text-sm text-gray-400">{client.address}</p>
+                        {client.ipv6_address && (
+                          <p className="text-sm text-gray-400 font-mono">{client.ipv6_address}</p>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
@@ -990,7 +1024,12 @@ function App() {
                           )}
                         </div>
                       </td>
-                      <td className="p-4 text-sm text-gray-300">{client.address}</td>
+                      <td className="p-4 text-sm text-gray-300">
+                        <p>{client.address}</p>
+                        {client.ipv6_address && (
+                          <p className="text-xs text-gray-400">{client.ipv6_address}</p>
+                        )}
+                      </td>
                       <td className="p-4">
                         <div className="flex items-center gap-2">
                           <div className={`w-2 h-2 rounded-full ${client.status ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
@@ -1061,7 +1100,8 @@ function App() {
     const commonSettings = [
       { key: 'server_ip', label: 'Server IP', type: 'text' },
       { key: 'custom_endpont', label: 'Custom Endpoint', type: 'text' },
-      { key: 'dns', label: 'DNS Server', type: 'text' },
+      { key: 'dns', label: 'IPv4 DNS Server', type: 'text' },
+      { key: 'ipv6_dns', label: 'IPv6 DNS Server', type: 'text' },
       { key: 'mtu', label: 'MTU', type: 'number' },
       { key: 'reset_time', label: 'Reset Time (hours)', type: 'number' },
       { key: 'ap_port', label: 'API + Panel Port', type: 'number' },
@@ -1098,7 +1138,7 @@ function App() {
               <h3 className="text-lg font-semibold mb-4 text-white">Add New Interface</h3>
               <form onSubmit={handleInterfaceSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Address Range</label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">IPv4 Address Range</label>
                   <input
                     type="text"
                     value={interfaceAddressRange}
@@ -1106,6 +1146,16 @@ function App() {
                     className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
                     placeholder="10.0.1.1/24"
                     required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">IPv6 Address Range (Optional)</label>
+                  <input
+                    type="text"
+                    value={interfaceIpv6AddressRange}
+                    onChange={(e) => setInterfaceIpv6AddressRange(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white transition-all duration-200"
+                    placeholder="fd86:ea04:1115::1/64"
                   />
                 </div>
                 <div>
@@ -1443,6 +1493,9 @@ function App() {
                       <div>
                         <p className="font-medium text-white">wg{iface.wg}</p>
                         <p className="text-sm text-gray-400">{iface.address_range}</p>
+                        {iface.ipv6_address_range && (
+                          <p className="text-xs text-gray-400">{iface.ipv6_address_range}</p>
+                        )}
                       </div>
                     </div>
                     <div className="text-right flex items-center gap-2">

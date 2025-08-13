@@ -43,6 +43,7 @@ class SQLite:
                     `public_key` TEXT NOT NULL,
                     `port` INTEGER NOT NULL UNIQUE,
                     `address_range` TEXT NOT NULL UNIQUE,
+                    `ipv6_address_range` TEXT UNIQUE,
                     `status` BOOLEAN DEFAULT 1
                 );
             """)
@@ -52,7 +53,8 @@ class SQLite:
                     `wg` INTEGER NOT NULL,
                     `public_key` TEXT NOT NULL UNIQUE, 
                     `private_key` TEXT NOT NULL,
-                    `address` TEXT NOT NULL UNIQUE, 
+                    `address` TEXT NOT NULL UNIQUE,
+                    `ipv6_address` TEXT UNIQUE,
                     `created_at` TEXT NOT NULL,
                     `expires` TEXT NOT NULL,
                     `note` TEXT DEFAULT '',
@@ -62,14 +64,24 @@ class SQLite:
                     `status` BOOLEAN NOT NULL DEFAULT 1
                 );
             """)
+
+            # Add IPv6 columns if they don't exist (migration for existing DBs)
+            self.cursor.execute("PRAGMA table_info(interfaces);")
+            interfaces_cols = [col[1] for col in self.cursor.fetchall()]
+            if 'ipv6_address_range' not in interfaces_cols:
+                self.cursor.execute("ALTER TABLE `interfaces` ADD COLUMN `ipv6_address_range` TEXT UNIQUE;")
+
+            self.cursor.execute("PRAGMA table_info(clients);")
+            clients_cols = [col[1] for col in self.cursor.fetchall()]
+            if 'ipv6_address' not in clients_cols:
+                self.cursor.execute("ALTER TABLE `clients` ADD COLUMN `ipv6_address` TEXT UNIQUE;")
+            
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `settings` (
                     `key` TEXT PRIMARY KEY,
                     `value` TEXT NOT NULL
                 );
             """)
-            # --- Telegram Bot Tables ---
-            # MODIFICATION HERE: Add 'language' column
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `users` (
                     `telegram_id` INTEGER PRIMARY KEY,
@@ -79,7 +91,7 @@ class SQLite:
                     `status` TEXT DEFAULT 'active',
                     `is_admin` BOOLEAN DEFAULT 0,
                     `created_at` TEXT NOT NULL,
-                    `language` TEXT DEFAULT 'en' -- New language column with default 'en'
+                    `language` TEXT DEFAULT 'en'
                 );
             """)
             self.cursor.execute("""
@@ -100,6 +112,8 @@ class SQLite:
                 );
             """)
             self.conn.commit()
+
+            # Insert default settings if the settings table is empty
             if self.count('settings') == 0:
                 self._insert_default_settings()
 
@@ -117,6 +131,7 @@ class SQLite:
             {'key': 'custom_endpont', 'value': '192.168.1.100'},
             {'key': 'session_token', 'value': 'NONE'},
             {'key': 'dns', 'value': '8.8.8.8'},
+            {'key': 'ipv6_dns', 'value': '2001:4860:4860::8888'},
             {'key': 'admin', 'value': '{"user":"admin","password":"admin"}'},
             {'key': 'status', 'value': '1'},
             {'key': 'alert', 'value': '["Welcome To Candy Panel - by AmiRCandy"]'},

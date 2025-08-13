@@ -1,3 +1,4 @@
+# main.py
 from flask import Flask, request, jsonify, abort, g, send_from_directory , send_file
 from functools import wraps
 from flask_cors import CORS
@@ -68,7 +69,7 @@ async def get_client_public_details(name: str, public_key: str):
 @app.get("/qr/<name>/<public_key>")
 async def get_qr_code(name: str, public_key: str):
     """
-    Generates and returns a QR code image for a client's configuration (without the private key).
+    Generates and returns a QR code image for a client's configuration (without the private key), with IPv6 support.
     This endpoint is publicly accessible.
     """
     client = await asyncio.to_thread(candy_panel.db.get, 'clients', where={'name': name, 'public_key': public_key})
@@ -79,18 +80,31 @@ async def get_qr_code(name: str, public_key: str):
     if not interface:
         return error_response("Associated WireGuard interface not found.", 500)
 
-    # Reconstruct the config without the private key for the QR code
+    # Reconstruct the config using live data
     dns = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'dns'})
     dns_value = dns['value'] if dns else '8.8.8.8'
+    ipv6_dns = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'ipv6_dns'})
+    ipv6_dns_value = ipv6_dns['value'] if ipv6_dns else None
+    
+    dns_list = [dns_value]
+    if ipv6_dns_value:
+        dns_list.append(ipv6_dns_value)
+    
+    dns_line = f"DNS = {', '.join(dns_list)}"
+
     mtu = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'mtu'})
     mtu_value = mtu['value'] if mtu else '1420'
     server_ip = await asyncio.to_thread(candy_panel.db.get, 'settings', where={'key': 'custom_endpont'})
     server_ip = server_ip['value']
 
+    address_line = f"Address = {client['address']}/32"
+    if client.get('ipv6_address'):
+        address_line += f", {client['ipv6_address']}/128"
+
     config_content = f"""[Interface]
 PrivateKey = {client['private_key']}
-Address = {client['address']}/32
-DNS = {dns_value}
+{address_line}
+{dns_line}
 MTU = {mtu_value}
 
 [Peer]
@@ -124,7 +138,7 @@ async def check_installation():
 @app.post("/api/auth")
 async def handle_auth():
     """
-    Handles both login and installation based on the 'action' field.
+    Handles both login and installation based on the 'action' field, with IPv6 support.
     """
     data = request.json
     if not data or 'action' not in data:
@@ -154,7 +168,9 @@ async def handle_auth():
             server_ip = data['server_ip']
             wg_port = data['wg_port']
             wg_address_range = data.get('wg_address_range', "10.0.0.1/24")
+            wg_ipv6_address = data.get('wg_ipv6_address', None)
             wg_dns = data.get('wg_dns', "8.8.8.8")
+            wg_ipv6_dns = data.get('wg_ipv6_dns', None)
             admin_user = data.get('admin_user', "admin")
             admin_password = data.get('admin_password', "admin")
         except KeyError as e:
@@ -167,7 +183,9 @@ async def handle_auth():
             wg_address_range,
             wg_dns,
             admin_user,
-            admin_password
+            admin_password,
+            wg_ipv6_address,
+            wg_ipv6_dns
         )
         if not success:
             return error_response(message, 400)
@@ -216,7 +234,7 @@ async def get_all_data():
 @authenticate_admin
 async def manage_resources():
     """
-    Unified endpoint for creating/updating/deleting clients, interfaces, and settings.
+    Unified endpoint for creating/updating/deleting clients, interfaces, and settings, with IPv6 support.
     Requires authentication.
     """
     data = request.json
@@ -277,10 +295,11 @@ async def manage_resources():
         elif resource == 'interface':
             if action == 'create':
                 address_range = data.get('address_range')
+                ipv6_address_range = data.get('ipv6_address_range')
                 port = data.get('port')
                 if not all([address_range, port]):
                     return error_response("Missing address_range or port for interface creation", 400)
-                success, message = await asyncio.to_thread(candy_panel._new_interface_wg, address_range, port)
+                success, message = await asyncio.to_thread(candy_panel._new_interface_wg, address_range, port, ipv6_address_range)
                 if not success:
                     return error_response(message, 400)
                 return success_response(message)
@@ -1054,9 +1073,10 @@ async def bot_admin_server_control():
     elif resource == 'interface':
         if action == 'create':
             address_range = payload_data.get('address_range')
+            ipv6_address_range = payload_data.get('ipv6_address_range')
             port = payload_data.get('port')
             if all([address_range, port]):
-                success, message = await asyncio.to_thread(candy_panel._new_interface_wg, address_range, port)
+                success, message = await asyncio.to_thread(candy_panel._new_interface_wg, address_range, port, ipv6_address_range)
         elif action == 'update':
             name = payload_data.get('name')
             address = payload_data.get('address')

@@ -21,7 +21,7 @@ class CandyPanel:
     @staticmethod
     def _is_valid_ip(ip: str) -> bool:
         """
-        Checks if a given string is a valid IP address.
+        Checks if a given string is a valid IPv4 or IPv6 address.
         """
         try:
             ipaddress.ip_address(ip)
@@ -99,10 +99,13 @@ class CandyPanel:
 
     def _get_all_ips_in_subnet(self, subnet_cidr: str) -> list[str]:
         """
-        Returns all host IPs within a given subnet CIDR.
+        Returns all host IPs within a given subnet CIDR, supporting IPv4 and IPv6.
         """
-        network = ipaddress.ip_network(subnet_cidr, strict=False)
-        return [str(ip) for ip in network.hosts()]
+        try:
+            network = ipaddress.ip_network(subnet_cidr, strict=False)
+            return [str(ip) for ip in network.hosts()]
+        except ValueError:
+            return []
 
     def _get_server_public_key(self, wg_id: int) -> str:
         """
@@ -123,22 +126,25 @@ class CandyPanel:
         pub = self.run_command(f"echo {priv} | wg pubkey")
         return priv, pub
 
-    def _get_used_ips(self, wg_id: int) -> set[int]:
+    def _get_used_ips(self, wg_id: int) -> set[str]:
         """
-        Parses the WireGuard configuration file to find used client IPs.
-        Assumes IPs are in the format 10.0.0.X/32.
+        Parses the WireGuard configuration file to find used client IPs (IPv4 and IPv6).
         """
+        used_ips = set()
         try:
             with open(WG_CONF_PATH.replace('X', str(wg_id)), "r") as f:
                 content = f.read()
-            # Regex to find IPs in "AllowedIPs = 10.0.0.X/32" format
-            # This regex needs to be more flexible if address_range can vary significantly
-            # For robustness, consider parsing the full IP and then checking if it's in the subnet
-            ips = re.findall(r"AllowedIPs\s*=\s*\d+\.\d+\.\d+\.(\d+)/32", content)
-            return set(int(ip) for ip in ips)
+            # Regex to find IPs in "AllowedIPs = 10.0.0.X/32" or "AllowedIPs = XXXX::/128" format
+            ips = re.findall(r"AllowedIPs\s*=\s*([0-9a-fA-F.:]+/\d+)", content)
+            for ip in ips:
+                # Normalize IP address to get just the host part
+                network = ipaddress.ip_network(ip, strict=False)
+                used_ips.add(str(network.network_address))
         except FileNotFoundError:
             print(f"Error: WireGuard config file not found for wg{wg_id}.")
-            return set() # Return empty set if config file doesn't exist
+        except Exception as e:
+            print(f"Error parsing used IPs for wg{wg_id}: {e}")
+        return used_ips
 
     def _backup_config(self, wg_id: int):
         """
@@ -165,16 +171,20 @@ class CandyPanel:
         self.run_command(f"sudo wg-quick up wg{wg_id}")
         print(f"[*] WireGuard interface wg{wg_id} reloaded.")
 
-    def _add_peer_to_config(self, wg_id: int, client_name: str, client_public_key: str, client_ip: str):
+    def _add_peer_to_config(self, wg_id: int, client_name: str, client_public_key: str, client_ip: str, client_ipv6: str = None):
         """
-        Adds a client peer entry to the WireGuard configuration file.
+        Adds a client peer entry to the WireGuard configuration file, including IPv6 if provided.
         """
         config_path = WG_CONF_PATH.replace('X', str(wg_id))
+        allowed_ips = f"{client_ip}/32"
+        if client_ipv6:
+            allowed_ips += f", {client_ipv6}/128"
+
         peer_entry = f"""
 [Peer]
 # {client_name}
 PublicKey = {client_public_key}
-AllowedIPs = {client_ip}/32
+AllowedIPs = {allowed_ips}
 """
         try:
             with open(config_path, "a") as f:
@@ -290,9 +300,11 @@ AllowedIPs = {client_ip}/32
                              wg_address_range: str = "10.0.0.1/24",
                              wg_dns: str = "8.8.8.8",
                              admin_user: str = 'admin',
-                             admin_password: str = 'admin') -> tuple[bool, str]:
+                             admin_password: str = 'admin',
+                             wg_ipv6_address: str = None,
+                             wg_ipv6_dns: str = None) -> tuple[bool, str]:
         """
-        Installs WireGuard and initializes the CandyPanel server configuration.
+        Installs WireGuard and initializes the CandyPanel server configuration, with IPv6 support.
         """
         if not self._is_valid_ip(server_ip):
             return False, 'IP INCORRECT'
@@ -312,6 +324,7 @@ AllowedIPs = {client_ip}/32
             self.run_command("sudo apt install -y ufw")
             self.run_command("sudo ufw default deny incoming")
             self.run_command("sudo ufw default allow outgoing")
+            # Allow both IPv4 and IPv6 for the WireGuard port
             self.run_command(f"sudo ufw allow {wg_port}/udp")
             self.run_command("sudo ufw allow ssh")
             ap_port = os.environ.get('AP_PORT', '3446')
@@ -365,17 +378,28 @@ AllowedIPs = {client_ip}/32
             with open(server_public_key_path) as f:
                 public_key = f.read().strip()
 
+        # Build Address and DNS lines for the config
+        addresses = [wg_address_range]
+        if wg_ipv6_address:
+            addresses.append(wg_ipv6_address)
+        address_line = "Address = " + ", ".join(addresses)
+        
+        dns_servers = [wg_dns]
+        if wg_ipv6_dns:
+            dns_servers.append(wg_ipv6_dns)
+        dns_line = "DNS = " + ", ".join(dns_servers)
+
         wg_conf_path = WG_CONF_PATH.replace('X', str(wg_id))
         wg_conf = f"""
 [Interface]
-Address = {wg_address_range}
+{address_line}
 ListenPort = {wg_port}
 PrivateKey = {private_key}
 MTU = 1420
-DNS = 8.8.8.8
+{dns_line}
 
-PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
-PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
+PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE; ip6tables -A FORWARD -i {interface_name} -j ACCEPT; ip6tables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE; ip6tables -D FORWARD -i {interface_name} -j ACCEPT; ip6tables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
         """.strip()
 
         with open(wg_conf_path, "w") as f:
@@ -390,7 +414,8 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                 'public_key': public_key,
                 'port': wg_port,
                 'address_range': wg_address_range,
-                'status': True # Default status is active
+                'status': True,
+                'ipv6_address_range': wg_ipv6_address
             })
         else:
             # Update if it already exists (e.g., re-running install)
@@ -399,7 +424,8 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
                 'public_key': public_key,
                 'port': wg_port,
                 'address_range': wg_address_range,
-                'status': True
+                'status': True,
+                'ipv6_address_range': wg_ipv6_address
             }, {'wg': wg_id})
 
         try:
@@ -412,6 +438,8 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         self.db.update('settings', {'value': server_ip}, {'key': 'server_ip'})
         self.db.update('settings', {'value': server_ip}, {'key': 'custom_endpont'})
         self.db.update('settings', {'value': wg_dns}, {'key': 'dns'})
+        if wg_ipv6_dns:
+            self.db.insert('settings', {'key': 'ipv6_dns', 'value': wg_ipv6_dns})
         # IMPORTANT: In a real app, hash the admin password before storing!
         admin_data = json.dumps({'user': admin_user, 'password': admin_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
@@ -484,35 +512,57 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         if not interface_wg:
             return False, f"WireGuard interface wg{wg_id} not found."
 
+        # Get existing IPs from both DB and config file
         used_ips = self._get_used_ips(wg_id)
-        network_address_prefix = interface_wg['address_range'].rsplit('.', 1)[0]
-        next_ip_host_part = 2
-
-        # Get IPs already assigned to clients in the DB for the current interface
         existing_client_ips = {c['address'] for c in self.db.select('clients', where={'wg': wg_id})}
 
-        while f"{network_address_prefix}.{next_ip_host_part}" in existing_client_ips or next_ip_host_part in used_ips:
-            next_ip_host_part += 1
-            if next_ip_host_part > 254:
-                return False, "No available IP addresses in the subnet."
-
-        client_ip = f"{network_address_prefix}.{next_ip_host_part}"
+        # Find an available IPv4 address
+        ipv4_network = ipaddress.ip_network(interface_wg['address_range'], strict=False)
+        client_ipv4 = None
+        for ip in ipv4_network.hosts():
+            if str(ip) not in existing_client_ips and str(ip) not in used_ips:
+                client_ipv4 = str(ip)
+                break
+        if not client_ipv4:
+            return False, "No available IPv4 addresses in the subnet."
+        
+        # Find an available IPv6 address if an IPv6 range is configured
+        client_ipv6 = None
+        if interface_wg.get('ipv6_address_range'):
+            ipv6_network = ipaddress.ip_network(interface_wg['ipv6_address_range'], strict=False)
+            existing_client_ipv6s = {c['ipv6_address'] for c in self.db.select('clients', where={'wg': wg_id})}
+            for ip in ipv6_network.hosts():
+                if str(ip) not in existing_client_ipv6s and str(ip) not in used_ips:
+                    client_ipv6 = str(ip)
+                    break
+            if not client_ipv6:
+                print("[!] Warning: No available IPv6 addresses found. Creating client with IPv4 only.")
+        
         client_private, client_public = self._generate_keypair()
 
         try:
-            self._add_peer_to_config(wg_id, name, client_public, client_ip)
+            self._add_peer_to_config(wg_id, name, client_public, client_ipv4, client_ipv6)
         except CommandExecutionError as e:
             return False, str(e)
-
+            
         server_ip = self.db.get('settings', where={'key': 'custom_endpont'})['value']
         dns = self.db.get('settings', where={'key': 'dns'})['value']
         mtu = self.db.get('settings', where={'key': 'mtu'})
         mtu_value = mtu['value'] if mtu else '1420'
-
+        
+        client_config_addresses = [client_ipv4 + "/32"]
+        client_config_dns = [dns]
+        
+        if client_ipv6:
+            client_config_addresses.append(client_ipv6 + "/128")
+            ipv6_dns = self.db.get('settings', where={'key': 'ipv6_dns'})
+            if ipv6_dns and ipv6_dns['value']:
+                client_config_dns.append(ipv6_dns['value'])
+        
         client_config = f"""[Interface]
 PrivateKey = {client_private}
-Address = {client_ip}/32
-DNS = {dns}
+Address = {', '.join(client_config_addresses)}
+DNS = {', '.join(client_config_dns)}
 MTU = {mtu_value}
 
 [Peer]
@@ -521,15 +571,13 @@ Endpoint = {server_ip}:{interface_wg['port']}
 AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
 """
-        # Initialize used_trafic with current WG counters, download/upload are 0
-        # This assumes a brand new client won't have existing traffic on wg show
         initial_used_traffic = json.dumps({'download': 0, 'upload': 0, 'last_wg_rx': 0, 'last_wg_tx': 0})
-
         self.db.insert('clients', {
             'name': name,
             'public_key': client_public,
             'private_key': client_private,
-            'address': client_ip,
+            'address': client_ipv4,
+            'ipv6_address': client_ipv6,
             'created_at': datetime.now().isoformat(),
             'expires': expire,
             'traffic': traffic, # Total traffic quota in bytes
@@ -615,7 +663,7 @@ PersistentKeepalive = 25
 
             if status: # Changing to Active
                 try:
-                    self._add_peer_to_config(wg_id, name, client_public_key, current_client['address'])
+                    self._add_peer_to_config(wg_id, name, client_public_key, current_client['address'], current_client.get('ipv6_address'))
                 except CommandExecutionError as e:
                     return False, str(e)
             else: # Changing to Inactive
@@ -633,9 +681,9 @@ PersistentKeepalive = 25
 
 
 
-    def _new_interface_wg(self, address_range: str, port: int) -> tuple[bool, str]:
+    def _new_interface_wg(self, address_range: str, port: int, ipv6_address_range: str = None) -> tuple[bool, str]:
         """
-        Creates a new WireGuard interface configuration and adds it to the database.
+        Creates a new WireGuard interface configuration and adds it to the database, with IPv6 support.
         """
         interfaces = self.db.select('interfaces')
         # Check for existing port or address range conflicts
@@ -644,6 +692,8 @@ PersistentKeepalive = 25
                 return False, f"An interface with port {port} already exists."
             if interface['address_range'] == address_range:
                 return False, f"An interface with address range {address_range} already exists."
+            if ipv6_address_range and interface.get('ipv6_address_range') == ipv6_address_range:
+                return False, f"An interface with IPv6 address range {ipv6_address_range} already exists."
 
         # Find the next available wg ID
         existing_wg_ids = sorted([int(i['wg']) for i in interfaces])
@@ -673,15 +723,30 @@ PersistentKeepalive = 25
             os.chmod(server_private_key_path, 0o600)
             with open(server_public_key_path, "w") as f:
                 f.write(public_key)
+
+        # Build Address and DNS lines for the config
+        addresses = [address_range]
+        if ipv6_address_range:
+            addresses.append(ipv6_address_range)
+        address_line = "Address = " + ", ".join(addresses)
+        
+        dns_settings = self.db.get('settings', where={'key': 'dns'})
+        dns = dns_settings['value'] if dns_settings else '8.8.8.8'
+        dns_servers = [dns]
+        ipv6_dns_settings = self.db.get('settings', where={'key': 'ipv6_dns'})
+        if ipv6_dns_settings and ipv6_dns_settings['value']:
+            dns_servers.append(ipv6_dns_settings['value'])
+        dns_line = "DNS = " + ", ".join(dns_servers)
+
         config = f"""[Interface]
 PrivateKey = {private_key}
-Address = {address_range}
+{address_line}
 ListenPort = {port}
 MTU = 1420
-DNS = 8.8.8.8
+{dns_line}
 
-PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
-PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
+PostUp = iptables -A FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE; ip6tables -A FORWARD -i {interface_name} -j ACCEPT; ip6tables -t nat -A POSTROUTING -o {default_interface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE; ip6tables -D FORWARD -i {interface_name} -j ACCEPT; ip6tables -t nat -D POSTROUTING -o {default_interface} -j MASQUERADE
 """
         try:
             with open(path, "w") as f:
@@ -699,13 +764,14 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
             'public_key': public_key,
             'port': port,
             'address_range': address_range,
+            'ipv6_address_range': ipv6_address_range,
             'status': True
         })
         return True, 'New Interface Created!'
 
     def _edit_interface(self, name: str, address: str = None, port: int = None, status: bool = None) -> tuple[bool, str]:
         """
-        Edits an existing WireGuard interface configuration and updates the database.
+        Edits an existing WireGuard interface configuration and updates the database, with IPv6 support.
         'name' should be in 'wgX' format (e.g., 'wg0').
         Handles starting/stopping the interface based on status change.
         """
@@ -729,15 +795,17 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
 
             new_lines = []
             for line in lines:
-                if address is not None and line.strip().startswith("Address ="):
-                    if line.strip() != f"Address = {address}":
-                        new_lines.append(f"Address = {address}\n")
+                if line.strip().startswith("Address ="):
+                    # This logic needs to be more robust for multiple addresses
+                    if address is not None and current_interface['address_range'] != address:
+                        new_line = line.replace(current_interface['address_range'], address)
+                        new_lines.append(new_line)
                         update_data['address_range'] = address
                         reload_needed = True
                     else:
                         new_lines.append(line)
                 elif port is not None and line.strip().startswith("ListenPort ="):
-                    if line.strip() != f"ListenPort = {port}":
+                    if int(current_interface['port']) != port:
                         new_lines.append(f"ListenPort = {port}\n")
                         update_data['port'] = port
                         reload_needed = True
@@ -822,7 +890,7 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
 
     def _get_client_config(self, name: str) -> tuple[bool, str]:
         """
-        Generates and returns the WireGuard client configuration for a given client name.
+        Generates and returns the WireGuard client configuration for a given client name, with IPv6 support.
         """
         client = self.db.get('clients', where={'name': name})
         if not client:
@@ -833,16 +901,24 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
             return False, f"Associated WireGuard interface wg{client['wg']} not found."
 
         dns = self.db.get('settings', where={'key': 'dns'})['value']
+        ipv6_dns_setting = self.db.get('settings', where={'key': 'ipv6_dns'})
         mtu = self.db.get('settings', where={'key': 'mtu'})
         mtu_value = mtu['value'] if mtu else '1420' # Default MTU if not found
-
         server_ip = self.db.get('settings', where={'key': 'custom_endpont'})['value']
+
+        address_line = f"Address = {client['address']}/32"
+        if client.get('ipv6_address'):
+            address_line += f", {client['ipv6_address']}/128"
+
+        dns_line = f"DNS = {dns}"
+        if ipv6_dns_setting and ipv6_dns_setting['value']:
+            dns_line += f", {ipv6_dns_setting['value']}"
 
         client_config = f"""
 [Interface]
 PrivateKey = {client['private_key']}
-Address = {client['address']}/32
-DNS = {dns}
+{address_line}
+{dns_line}
 MTU = {mtu_value}
 
 [Peer]
