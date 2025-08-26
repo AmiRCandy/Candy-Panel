@@ -1,5 +1,5 @@
 # main.py
-from flask import Flask, request, jsonify, abort, g, send_from_directory , send_file
+from flask import Flask, request, jsonify, abort, g, send_from_directory , send_file, redirect
 from functools import wraps
 from flask_cors import CORS
 import asyncio
@@ -7,6 +7,8 @@ import json
 from datetime import datetime, timedelta
 import os
 import subprocess
+import threading
+import time
 
 # Import your CandyPanel logic
 from core import CandyPanel, CommandExecutionError
@@ -18,6 +20,24 @@ candy_panel = CandyPanel()
 app = Flask(__name__, static_folder=os.path.join(os.getcwd(), '..', 'Frontend', 'dist'), static_url_path='/static')
 app.config['SECRET_KEY'] = 'your_super_secret_key'
 CORS(app)
+
+# --- Background Sync Thread ---
+def background_sync():
+    """Background thread function that runs sync every 5 minutes"""
+    while True:
+        try:
+            print("[*] Starting background sync...")
+            candy_panel._sync()
+            print("[*] Background sync completed successfully.")
+        except Exception as e:
+            print(f"[!] Error in background sync: {e}")
+        # Sleep for 5 minutes (300 seconds)
+        time.sleep(300)
+
+# Start background sync thread
+sync_thread = threading.Thread(target=background_sync, daemon=True)
+sync_thread.start()
+print("[+] Background sync thread started.")
 
 # --- Authentication Decorator for CandyPanel Admin API ---
 def authenticate_admin(f):
@@ -66,6 +86,43 @@ async def get_client_public_details(name: str, public_key: str):
             return error_response("Client not found or public key mismatch.", 404)
     except Exception as e:
         return error_response(f"An error occurred: {e}", 500)
+
+@app.get("/shortlink/<name>/<public_key>")
+async def shortlink_redirect(name: str, public_key: str):
+    """
+    Handles shortlink redirects to the client details page.
+    This replaces the frontend shortlink handling.
+    """
+    try:
+        # Verify client exists before redirecting
+        client = await asyncio.to_thread(candy_panel.db.get, 'clients', where={'name': name, 'public_key': public_key})
+        if not client:
+            # Serve a simple error page
+            return f"""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Client Not Found</title></head>
+            <body style="font-family: Arial, sans-serif; text-align: center; margin-top: 50px;">
+                <h1>Client Not Found</h1>
+                <p>The requested client does not exist or the link is invalid.</p>
+            </body>
+            </html>
+            """, 404
+        
+        # Serve the client details page directly
+        return send_from_directory(app.static_folder, 'client.html')
+    except Exception as e:
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Error</title></head>
+        <body style="font-family: Arial, sans-serif; text-align: center; margin-top: 50px;">
+            <h1>Error</h1>
+            <p>An error occurred: {e}</p>
+        </body>
+        </html>
+        """, 500
+
 @app.get("/qr/<name>/<public_key>")
 async def get_qr_code(name: str, public_key: str):
     """

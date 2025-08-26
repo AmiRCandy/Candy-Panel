@@ -444,16 +444,13 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         admin_data = json.dumps({'user': admin_user, 'password': admin_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
-        current_dir = os.path.abspath(os.path.dirname(__file__))
-        cron_script_path = os.path.join(current_dir, 'cron.py')
-        backend_dir = os.path.dirname(cron_script_path)
-        cron_line = f"*/5 * * * * cd {backend_dir} && source venv/bin/activate && python3 {cron_script_path} >> /var/log/candy-sync.log 2>&1"
-        self.run_command(f'(crontab -l 2>/dev/null; echo "{cron_line}") | crontab -')
+        print("[+] Installation completed. Sync will run automatically in the background via main.py thread.")
         return True, 'Installed successfully!'
 
     def _admin_login(self, user: str, password: str) -> tuple[bool, str]:
         """
         Authenticates an admin user.
+{{ ... }}
         WARNING: Password stored in plaintext in DB. This should be hashed!
         """
         admin_settings = json.loads(self.db.get('settings', where={'key': 'admin'})['value'])
