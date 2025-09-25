@@ -90,13 +90,13 @@ function App() {
   const [wgIpv6Dns, setWgIpv6Dns] = useState('2001:4860:4860::8888');
   const [adminUser, setAdminUser] = useState('admin');
   const [adminPassword, setAdminPassword] = useState('admin');
-
   // Client form states
   const [showClientForm, setShowClientForm] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [clientName, setClientName] = useState('');
   const [clientExpires, setClientExpires] = useState('');
   const [clientTraffic, setClientTraffic] = useState('');
+  const [clientTrafficUnit, setClientTrafficUnit] = useState('MB'); // New state for traffic unit
   const [clientWgId, setClientWgId] = useState('0');
   const [clientNote, setClientNote] = useState('');
   const [clientStatus, setClientStatus] = useState(true); // New state for client status
@@ -251,7 +251,8 @@ function App() {
     e.preventDefault();
     try {
       setLoading(true);
-      const trafficInBytes = (parseFloat(clientTraffic) * 1024 * 1024).toString();
+      const multiplier = clientTrafficUnit === 'GB' ? 1024 * 1024 * 1024 : 1024 * 1024;
+      const trafficInBytes = (parseFloat(clientTraffic) * multiplier).toString();
       if (editingClient) {
         const response = await apiClient.updateClient({
           name: editingClient.name,
@@ -315,6 +316,7 @@ function App() {
     setClientName('');
     setClientExpires('');
     setClientTraffic('');
+    setClientTrafficUnit('MB');
     setClientWgId('0');
     setClientNote('');
     setClientStatus(true);
@@ -324,8 +326,23 @@ function App() {
     setEditingClient(client);
     setClientName(client.name);
     setClientExpires(client.expires.split('T')[0]);
-    setClientTraffic(client.traffic);
-    setClientWgId(client.wg.toString());
+    
+    // Convert traffic from bytes to appropriate unit
+    const trafficBytes = parseInt(client.traffic);
+    const gb = trafficBytes / (1024 * 1024 * 1024);
+    const mb = trafficBytes / (1024 * 1024);
+    
+    if (gb >= 1 && gb % 1 === 0) {
+      // If it's a whole number of GB, use GB
+      setClientTraffic(gb.toString());
+      setClientTrafficUnit('GB');
+    } else {
+      // Otherwise use MB
+      setClientTraffic(mb.toString());
+      setClientTrafficUnit('MB');
+    }
+    
+    setClientWgId(client.wg?.toString() || '0');
     setClientNote(client.note);
     setClientStatus(client.status);
     setShowClientForm(true);
@@ -916,7 +933,7 @@ function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Traffic Limit (MB)</label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Traffic Limit</label>
                   <input
                     type="number"
                     value={clientTraffic}

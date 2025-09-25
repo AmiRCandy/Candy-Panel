@@ -50,14 +50,32 @@ const formatUptime = (seconds: number): string => { // Reusing function from mai
   return `${minutes}m`;
 };
 
-
 const getTrafficPercentage = (used: number, total: number): number => {
   if (total === 0) return 0;
   return Math.min((used / total) * 100, 100);
 };
 
-function ClientDetailsPage() { // Renamed from App to ClientDetailsPage
-  const { clientname, clientpubkey } = useParams<{ clientname: string; clientpubkey: string }>(); // Get params from URL
+interface ClientDetailsPageProps {
+  clientName?: string;
+  clientPubKey?: string;
+}
+
+function ClientDetailsPage({ clientName: propClientName, clientPubKey: propClientPubKey }: ClientDetailsPageProps = {}) {
+  const routerParams = useParams<{ clientname: string; clientpubkey: string }>();
+  
+  // Use props if provided, otherwise fall back to router params, then URL parsing
+  let clientname = propClientName || routerParams.clientname;
+  let clientpubkey = propClientPubKey || routerParams.clientpubkey;
+  
+  // If still no params, try to parse from URL path (for standalone mode)
+  if (!clientname || !clientpubkey) {
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts.length >= 4 && pathParts[1] === 'shortlink') {
+      clientname = pathParts[2];
+      clientpubkey = pathParts[3];
+    }
+  }
+
   const [clientData, setClientData] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

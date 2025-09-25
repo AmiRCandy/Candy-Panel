@@ -10,6 +10,6 @@ const clientPubKey = pathParts[3];
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ClientDetailsPage />
+    <ClientDetailsPage clientName={clientName} clientPubKey={clientPubKey} />
   </StrictMode>
 );
