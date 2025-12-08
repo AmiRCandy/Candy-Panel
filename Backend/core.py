@@ -3,6 +3,7 @@ import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re ,
 from db import SQLite
 from nanoid import generate
 from datetime import datetime , timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # --- Configuration Paths (Consider making these configurable in a real app) ---
 SERVER_PUBLIC_KEY_PATH = "/etc/wireguard/server_public_wgX.key"
@@ -440,8 +441,10 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         self.db.update('settings', {'value': wg_dns}, {'key': 'dns'})
         if wg_ipv6_dns:
             self.db.update('settings',  {'value': wg_ipv6_dns},{'key': 'ipv6_dns'})
-        # IMPORTANT: In a real app, hash the admin password before storing!
-        admin_data = json.dumps({'user': admin_user, 'password': admin_password})
+
+        # Hash the admin password before storing
+        hashed_password = generate_password_hash(admin_password)
+        admin_data = json.dumps({'user': admin_user, 'password': hashed_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
         print("[+] Installation completed. Sync will run automatically in the background via main.py thread.")
@@ -450,11 +453,23 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
     def _admin_login(self, user: str, password: str) -> tuple[bool, str]:
         """
         Authenticates an admin user.
-{{ ... }}
-        WARNING: Password stored in plaintext in DB. This should be hashed!
         """
         admin_settings = json.loads(self.db.get('settings', where={'key': 'admin'})['value'])
-        if admin_settings.get('user') == user and admin_settings.get('password') == password:
+        stored_password_hash = admin_settings.get('password')
+
+        # Check if the stored password is hashed or plain text (for backward compatibility)
+        password_valid = False
+        if stored_password_hash.startswith('scrypt:') or stored_password_hash.startswith('pbkdf2:'):
+             if check_password_hash(stored_password_hash, password):
+                 password_valid = True
+        elif stored_password_hash == password:
+             # If plaintext (legacy), upgrade to hash
+             new_hash = generate_password_hash(password)
+             admin_settings['password'] = new_hash
+             self.db.update('settings', {'value': json.dumps(admin_settings)}, {'key': 'admin'})
+             password_valid = True
+
+        if admin_settings.get('user') == user and password_valid:
             session_token = str(uuid.uuid4())
             self.db.update('settings', {'value': session_token}, {'key': 'session_token'})
             return True, session_token
@@ -726,7 +741,7 @@ PersistentKeepalive = 25
         if ipv6_address_range:
             addresses.append(ipv6_address_range)
         address_line = "Address = " + ", ".join(addresses)
-        
+
         dns_settings = self.db.get('settings', where={'key': 'dns'})
         dns = dns_settings['value'] if dns_settings else '8.8.8.8'
         dns_servers = [dns]
@@ -1143,7 +1158,7 @@ PersistentKeepalive = 25
                     print(f"[+] Telegram bot (PID: {current_pid}) stopped.")
                 else:
                     print(f"[!] PID {current_pid} is not identified as the Telegram bot. Not terminating.")
-                
+
                 self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
                 self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_status'})
                 return True

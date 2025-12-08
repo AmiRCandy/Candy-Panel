@@ -1,0 +1,10 @@
+flask
+flask_cors
+pyrogram
+requests
+psutil
+httpx
+tgcrypto
+nanoid
+netifaces
+werkzeug
