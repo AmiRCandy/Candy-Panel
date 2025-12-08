@@ -30,7 +30,7 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/AmiRCandy/Candy-Pan
 ### Prerequisites
 
 - Node.js 20+ and npm
-- Python 3.8+
+- Python 3.10+
 - WireGuard installed on your server
 
 ### Frontend Setup
@@ -60,12 +60,12 @@ npm run dev
 
 1. **Navigate to backend directory**
 ```bash
-cd backend
+cd Backend
 ```
 
 2. **Install Python dependencies**
 ```bash
-pip install fastapi uvicorn sqlite3 subprocess psutil
+pip install -r requirements.txt
 ```
 
 3. **Start the backend server**
@@ -74,8 +74,8 @@ python main.py
 ```
 
 4. **Access the application**
-   - Frontend: `http://localhost:3445`
-   - Backend API: `http://localhost:3445`
+   - Frontend: `http://localhost:3446`
+   - Backend API: `http://localhost:3446`
 
 ## 🏗️ Architecture
 
@@ -89,7 +89,6 @@ python main.py
 ### Backend Stack
 - **Flask** for high-performance API
 - **SQLite** for database management
-- **Pydantic** for data validation
 - **WireGuard** integration for VPN management
 
 ## 🔧 Configuration
@@ -158,7 +157,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [WireGuard](https://www.wireguard.com/) for the amazing VPN technology
 - [shadcn/ui](https://ui.shadcn.com/) for the beautiful UI components
-- [FastAPI](https://fastapi.tiangolo.com/) for the excellent Python framework
+- [Flask](https://flask.palletsprojects.com/) for the excellent Python framework
 - [React](https://reactjs.org/) and [Vite](https://vitejs.dev/) for the frontend tools (Frontend built by [BoltAI](https://bolt.new))
 
 ## 📞 Support
@@ -194,5 +193,3 @@ Thanks to [@Byte-Aura](https://github.com/Byte-Aura) for help with planning and 
     <a href="https://github.com/AmiRCandy/Candy-Panel/issues">✨ Request Feature</a>
   </p>
 </div>
-
-

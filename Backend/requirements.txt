@@ -1,0 +1,9 @@
+flask[async]
+flask-cors
+psutil
+netifaces
+pyrogram
+tgcrypto
+httpx
+nanoid
+werkzeug

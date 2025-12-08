@@ -3,6 +3,7 @@ import subprocess, json, random, uuid, time, ipaddress, os, psutil, shutil, re ,
 from db import SQLite
 from nanoid import generate
 from datetime import datetime , timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # --- Configuration Paths (Consider making these configurable in a real app) ---
 SERVER_PUBLIC_KEY_PATH = "/etc/wireguard/server_public_wgX.key"
@@ -29,24 +30,32 @@ class CandyPanel:
         except ValueError:
             return False
 
-    def run_command(self, cmd: str, check: bool = True) -> str | None:
+    def run_command(self, cmd: str | list, check: bool = True, shell: bool = False) -> str | None:
         """
         Executes a shell command and returns its stdout.
         Raises an exception if the command fails and 'check' is True.
+        Accepts cmd as string (requires shell=True) or list of args (preferred, shell=False).
         """
         try:
-            result = subprocess.run(cmd, shell=True, check=check, capture_output=True, text=True)
+            # If cmd is a list, shell should default to False unless overridden
+            if isinstance(cmd, list) and not shell:
+                result = subprocess.run(cmd, check=check, capture_output=True, text=True)
+            else:
+                # Fallback for string commands, explicitly needing shell=True
+                result = subprocess.run(cmd, shell=True, check=check, capture_output=True, text=True)
+
             if result.returncode != 0:
-                # Log the error instead of just printing and exiting
-                print(f"Error running command '{cmd}': {result.stderr.strip()}")
-                raise Exception(f"Command failed: {result.stderr.strip()}")
+                # Log the error
+                error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+                print(f"Error running command '{cmd}': {error_msg}")
+                if check:
+                     raise Exception(f"Command failed: {error_msg}")
             return result.stdout.strip()
         except subprocess.CalledProcessError as e:
-            print(f"Error running '{cmd}': {e.stderr.strip()}")
+            error_msg = e.stderr.strip() if e.stderr else "Unknown error"
+            print(f"Error running '{cmd}': {error_msg}")
             if check:
-                # In a production app, consider raising a custom exception here
-                # instead of exiting, to allow the caller to handle it gracefully.
-                raise CommandExecutionError(f"Command '{cmd}' failed: {e.stderr.strip()}")
+                raise CommandExecutionError(f"Command '{cmd}' failed: {error_msg}")
             return None
         except Exception as e:
             print(f"An unexpected error occurred while running '{cmd}': {e}")
@@ -263,6 +272,7 @@ AllowedIPs = {allowed_ips}
         traffic_data = {}
         try:
             # Use 'sudo wg show <interface> dump' to get machine-readable output
+            # We use subprocess.run directly with a list for safety, skipping the helper since we need structured output processing
             result = subprocess.run(['sudo', 'wg', 'show', f"wg{wg_id}", 'dump'], capture_output=True, text=True, check=True)
             output_lines = result.stdout.strip().splitlines()
 
@@ -273,7 +283,7 @@ AllowedIPs = {allowed_ips}
                 parts = line.strip().split('\t') # Explicitly split by tab
 
                 # A valid peer line should have exactly 8 parts
-                if len(parts) == 8:
+                if len(parts) >= 8: # Sometimes fields can be more, but first 8 are standard
                     try:
                         pubkey = parts[0] # Peer public key is the first field
                         rx = int(parts[5]) # transfer_rx is the 6th field (index 5)
@@ -281,7 +291,7 @@ AllowedIPs = {allowed_ips}
                         traffic_data[pubkey] = {'rx': rx, 'tx': tx}
                     except (ValueError, IndexError) as e:
                         print(f"Warning: Could not parse wg dump peer line: '{line.strip()}'. Error: {e}")
-                elif len(parts) == 4:
+                elif len(parts) >= 4:
                     # This is likely the interface line (Private Key, Public Key, Listen Port, FwMark)
                     # We can skip this line as it doesn't contain peer traffic info.
                     pass
@@ -290,7 +300,8 @@ AllowedIPs = {allowed_ips}
                     print(f"Warning: Unexpected line format or number of parts in wg dump output: '{line.strip()}'")
 
         except subprocess.CalledProcessError as e:
-            print(f"Warning: Failed to run `sudo wg show wg{wg_id} dump`. Error: {e.stderr.strip()}. Please ensure WireGuard is installed and you have appropriate permissions (e.g., sudo access).")
+            error_msg = e.stderr.strip() if e.stderr else "Unknown error"
+            print(f"Warning: Failed to run `sudo wg show wg{wg_id} dump`. Error: {error_msg}. Please ensure WireGuard is installed and you have appropriate permissions (e.g., sudo access).")
         except Exception as e:
             print(f"An unexpected error occurred while getting traffic for wg{wg_id}: {e}")
         return traffic_data
@@ -440,8 +451,9 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
         self.db.update('settings', {'value': wg_dns}, {'key': 'dns'})
         if wg_ipv6_dns:
             self.db.update('settings',  {'value': wg_ipv6_dns},{'key': 'ipv6_dns'})
-        # IMPORTANT: In a real app, hash the admin password before storing!
-        admin_data = json.dumps({'user': admin_user, 'password': admin_password})
+        # Hash the admin password before storing
+        hashed_password = generate_password_hash(admin_password)
+        admin_data = json.dumps({'user': admin_user, 'password': hashed_password})
         self.db.update('settings', {'value': admin_data}, {'key': 'admin'})
         self.db.update('settings', {'value': '1'}, {'key': 'install'})
         print("[+] Installation completed. Sync will run automatically in the background via main.py thread.")
@@ -450,11 +462,22 @@ PostDown = iptables -D FORWARD -i {interface_name} -j ACCEPT; iptables -t nat -D
     def _admin_login(self, user: str, password: str) -> tuple[bool, str]:
         """
         Authenticates an admin user.
-{{ ... }}
-        WARNING: Password stored in plaintext in DB. This should be hashed!
         """
         admin_settings = json.loads(self.db.get('settings', where={'key': 'admin'})['value'])
-        if admin_settings.get('user') == user and admin_settings.get('password') == password:
+        stored_password = admin_settings.get('password')
+
+        # Check if password matches directly (legacy plaintext) or via hash
+        is_valid = False
+        if stored_password == password:
+             # If it matched as plaintext, upgrade to hash immediately
+            is_valid = True
+            new_hash = generate_password_hash(password)
+            admin_settings['password'] = new_hash
+            self.db.update('settings', {'value': json.dumps(admin_settings)}, {'key': 'admin'})
+        elif check_password_hash(stored_password, password):
+            is_valid = True
+
+        if admin_settings.get('user') == user and is_valid:
             session_token = str(uuid.uuid4())
             self.db.update('settings', {'value': session_token}, {'key': 'session_token'})
             return True, session_token
@@ -726,7 +749,7 @@ PersistentKeepalive = 25
         if ipv6_address_range:
             addresses.append(ipv6_address_range)
         address_line = "Address = " + ", ".join(addresses)
-        
+
         dns_settings = self.db.get('settings', where={'key': 'dns'})
         dns = dns_settings['value'] if dns_settings else '8.8.8.8'
         dns_servers = [dns]
@@ -1143,7 +1166,7 @@ PersistentKeepalive = 25
                     print(f"[+] Telegram bot (PID: {current_pid}) stopped.")
                 else:
                     print(f"[!] PID {current_pid} is not identified as the Telegram bot. Not terminating.")
-                
+
                 self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_pid'})
                 self.db.update('settings', {'value': '0'}, {'key': 'telegram_bot_status'})
                 return True

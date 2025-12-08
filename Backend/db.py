@@ -3,6 +3,7 @@ import sqlite3
 import time
 import json , os
 from datetime import datetime
+from werkzeug.security import generate_password_hash
 
 class SQLite:
     def __init__(self, db_path='CandyPanel.db'):
@@ -49,16 +50,16 @@ class SQLite:
             """)
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `clients` (
-                    `name` TEXT NOT NULL UNIQUE, 
+                    `name` TEXT NOT NULL UNIQUE,
                     `wg` INTEGER NOT NULL,
-                    `public_key` TEXT NOT NULL UNIQUE, 
+                    `public_key` TEXT NOT NULL UNIQUE,
                     `private_key` TEXT NOT NULL,
                     `address` TEXT NOT NULL UNIQUE,
                     `ipv6_address` TEXT UNIQUE,
                     `created_at` TEXT NOT NULL,
                     `expires` TEXT NOT NULL,
                     `note` TEXT DEFAULT '',
-                    `traffic` TEXT NOT NULL, 
+                    `traffic` TEXT NOT NULL,
                     `used_trafic` TEXT NOT NULL DEFAULT '{"download":0,"upload":0, "last_wg_rx":0, "last_wg_tx":0}',
                     `connected_now` BOOLEAN NOT NULL DEFAULT 0,
                     `status` BOOLEAN NOT NULL DEFAULT 1
@@ -75,7 +76,7 @@ class SQLite:
             clients_cols = [col[1] for col in self.cursor.fetchall()]
             if 'ipv6_address' not in clients_cols:
                 self.cursor.execute("ALTER TABLE `clients` ADD COLUMN `ipv6_address` TEXT UNIQUE;")
-            
+
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `settings` (
                     `key` TEXT PRIMARY KEY,
@@ -85,7 +86,7 @@ class SQLite:
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS `users` (
                     `telegram_id` INTEGER PRIMARY KEY,
-                    `candy_client_name` TEXT UNIQUE, 
+                    `candy_client_name` TEXT UNIQUE,
                     `traffic_bought_gb` REAL DEFAULT 0,
                     `time_bought_days` INTEGER DEFAULT 0,
                     `status` TEXT DEFAULT 'active',
@@ -98,14 +99,14 @@ class SQLite:
                 CREATE TABLE IF NOT EXISTS `transactions` (
                     `order_id` TEXT PRIMARY KEY,
                     `telegram_id` INTEGER NOT NULL,
-                    `amount` REAL NOT NULL, 
+                    `amount` REAL NOT NULL,
                     `card_number_sent` TEXT,
-                    `status` TEXT DEFAULT 'pending', 
+                    `status` TEXT DEFAULT 'pending',
                     `requested_at` TEXT NOT NULL,
                     `approved_at` TEXT,
                     `admin_note` TEXT,
-                    `purchase_type` TEXT, 
-                    `quantity` REAL, 
+                    `purchase_type` TEXT,
+                    `quantity` REAL,
                     `time_quantity` REAL DEFAULT 0,
                     `traffic_quantity` REAL DEFAULT 0,
                     FOREIGN KEY (`telegram_id`) REFERENCES `users`(`telegram_id`)
@@ -132,20 +133,20 @@ class SQLite:
             {'key': 'session_token', 'value': 'NONE'},
             {'key': 'dns', 'value': '8.8.8.8'},
             {'key': 'ipv6_dns', 'value': '2001:4860:4860::8888'},
-            {'key': 'admin', 'value': '{"user":"admin","password":"admin"}'},
+            {'key': 'admin', 'value': json.dumps({"user": "admin", "password": generate_password_hash("admin")})},
             {'key': 'status', 'value': '1'},
             {'key': 'alert', 'value': '["Welcome To Candy Panel - by AmiRCandy"]'},
             {'key': 'reset_time', 'value': '0'},
-            {'key': 'mtu', 'value': '1420'}, 
+            {'key': 'mtu', 'value': '1420'},
             {'key': 'bandwidth', 'value': '0'},
             {'key': 'uptime', 'value': '0'},
             {'key': 'telegram_bot_status', 'value': '0'},
             {'key': 'telegram_bot_admin_id', 'value': '0'},
-            {'key': 'telegram_bot_token', 'value': 'YOUR_TELEGRAM_BOT_TOKEN'}, 
-            {'key': 'telegram_api_hash', 'value': 'YOUR_TELEGRAM_API_HASH'}, 
-            {'key': 'telegram_api_id', 'value': 'YOUR_TELEGRAM_API_ID'}, 
-            {'key': 'admin_card_number', 'value': 'YOUR_ADMIN_CARD_NUMBER'}, 
-            {'key': 'prices', 'value': '{"1GB": 4000, "1Month": 75000}'}, 
+            {'key': 'telegram_bot_token', 'value': 'YOUR_TELEGRAM_BOT_TOKEN'},
+            {'key': 'telegram_api_hash', 'value': 'YOUR_TELEGRAM_API_HASH'},
+            {'key': 'telegram_api_id', 'value': 'YOUR_TELEGRAM_API_ID'},
+            {'key': 'admin_card_number', 'value': 'YOUR_ADMIN_CARD_NUMBER'},
+            {'key': 'prices', 'value': '{"1GB": 4000, "1Month": 75000}'},
             {'key': 'api_tokens', 'value': '{}'},
             {'key': 'auto_backup', 'value': '1'},
             {'key': 'install', 'value': '0'},
@@ -175,7 +176,7 @@ class SQLite:
                 return self.cursor.rowcount
         except sqlite3.Error as e:
             print(f"Database query failed: {e}\nQuery: {query}\nParams: {params}")
-            raise 
+            raise
 
     def select(self, table: str, columns: str | list[str] = '*', where: dict = None) -> list[dict]:
         """
